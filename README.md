@@ -1,0 +1,51 @@
+# Weave — a 3D web of thoughts (Android)
+
+A note-taking app where your notes don't sit in a list. Each one becomes a glowing thought
+in a 3D web that keeps growing as you add to it. It's written in Kotlin with Jetpack Compose and
+Material 3. On Pixel phones and other Android 12+ devices it picks up your wallpaper
+colors through Material You.
+
+## What it does
+
+| | |
+|---|---|
+| **Web of thoughts** | Every note is a node in 3D space. New notes branch off the thought you last focused (or your latest one), and faint silk strands tie nearby thoughts together. |
+| **Timestamped & editable** | Each note records when it was created and last edited. Tap a thought to read, edit or delete it. Deleting one reconnects its branches to the thought it grew from. |
+| **Explore in 3D** | Drag to spin the web freely in any direction. Pinch to zoom, twist two fingers to roll it, and fling it to keep it turning. It slowly drifts when left alone. |
+| **Weave animation** | When you save a new note, the card shrinks and flies into the web while the camera pulls back. The thought springs out from its parent, strands reach over from its neighbours, and a small spider web spins up around it with a soft chime. |
+| **Snap to move** | Long-press a thought to pick it up (along with its branches), then drag it. A dashed line previews where it will attach. Let go and the old strand snaps and recoils, the thought springs into place and the new strand twangs. A shock wave runs through the web, with a snap sound and haptics. |
+| **All thoughts** | The list button shows every thought with its timestamps. Pick one to fly to it. |
+
+Everything stays on the device (`files/weave.json`). The sounds are synthesized in code,
+so there are no audio assets.
+
+## Build & run
+
+Requirements: Android Studio Ladybug or newer (or JDK 17 plus the Android SDK with API 35).
+
+```bash
+./gradlew installDebug        # onto a connected device / emulator
+./gradlew assembleRelease     # minified APK in app/build/outputs/apk/release
+```
+
+The release build is signed with the debug key so it installs directly. Add a real signing
+config before publishing.
+
+CI (`.github/workflows/android.yml`) builds a debug APK on every push and PR
+and uploads it as the `weave-debug-apk` artifact.
+
+## Code map
+
+```
+app/src/main/java/com/mobilaunch/weave/
+├── MainActivity.kt          edge-to-edge host
+├── WeaveViewModel.kt
+├── data/                    Note model + JSON-backed repository
+├── web/
+│   ├── Vec3.kt, Camera.kt   3D math and the orbit camera (perspective projection)
+│   ├── WebLayout.kt         where new thoughts grow, silk links, subtrees
+│   ├── WebScene.kt          per-frame state, animations (spawn, snap, ripple) and rendering
+│   └── WebCanvas.kt         Compose canvas + gestures
+├── audio/WebSounds.kt       synthesized snap + weave sounds
+└── ui/                      main screen, note editor, thought list, Material You theme
+```
