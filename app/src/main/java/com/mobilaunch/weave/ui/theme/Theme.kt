@@ -47,3 +47,14 @@ fun WeaveTheme(content: @Composable () -> Unit) {
     }
     MaterialTheme(colorScheme = scheme, content = content)
 }
+
+/** The brighter twilight palette behind the web and the editor. */
+object Twilight {
+    val top = Color(0xFF232A72)
+    val bottom = Color(0xFF4B2C73)
+    val nebulas = listOf(Color(0x48FF7EB6), Color(0x4060E3E0), Color(0x34FFD166))
+    val label = Color(0xFF1D1B3A)
+    val labelPill = Color(0xEEFFFFFF)
+    val orbs = listOf(Color(0xFF8AB4F8), Color(0xFFFF8BCB), Color(0xFF78D9EC), Color(0xFFFDD663))
+    val focus = Color(0xFFFFE08A)
+}

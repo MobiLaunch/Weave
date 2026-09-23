@@ -16,6 +16,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.ui.graphics.Color
 import com.mobilaunch.weave.data.Category
+import com.mobilaunch.weave.ui.theme.Twilight
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -205,7 +206,7 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                         createdAt = existing?.createdAt,
                         updatedAt = existing?.updatedAt,
                         branchFrom = parent?.snippet,
-                        initialMood = existing?.mood,
+                        initialBlend = existing?.blend,
                         // New thoughts inherit the category being viewed, or their parent's.
                         initialCategory = existing?.category ?: scene.filter ?: parent?.category,
                         origin = target.origin,
@@ -213,10 +214,10 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                             if (existing == null) scene.viewCenter() else scene.screenPos(existing.id)
                         },
                         orbRadiusPx = orbRadiusPx,
-                        onSave = { text, mood, category ->
+                        onSave = { text, blend, category ->
                             when (target) {
                                 is EditorTarget.New -> {
-                                    val note = vm.createNote(text, target.parentId, mood, category)
+                                    val note = vm.createNote(text, target.parentId, blend, category)
                                     scene.onNoteCreated(note, WebScene.SPAWN_DELAY_MS)
                                     scope.launch {
                                         delay(WebScene.SPAWN_DELAY_MS)
@@ -224,7 +225,7 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                                         view.confirmHaptic()
                                     }
                                 }
-                                is EditorTarget.Existing -> vm.updateNote(target.id, text, mood, category)
+                                is EditorTarget.Existing -> vm.updateNote(target.id, text, blend, category)
                             }
                         },
                         onDelete = {
@@ -262,13 +263,17 @@ private fun rememberWebStyle(): WebStyle {
     val labelStyle = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium)
     return remember(cs, labelStyle) {
         WebStyle(
-            background = cs.surfaceContainerLowest,
-            glow = cs.primary.copy(alpha = 0.12f),
-            dust = cs.onSurface,
-            palette = listOf(cs.primary, cs.tertiary, cs.secondary, lerp(cs.primary, cs.tertiary, 0.5f)),
-            focus = cs.primary,
-            label = cs.onSurface,
-            labelBackground = cs.surfaceContainerHigh.copy(alpha = 0.78f),
+            background = Twilight.bottom,
+            skyTop = Twilight.top,
+            skyBottom = Twilight.bottom,
+            nebulas = Twilight.nebulas,
+            glow = lerp(cs.primary, Color.White, 0.3f).copy(alpha = 0.18f),
+            dust = Color.White,
+            // Wallpaper colours first, then bright twilight hues.
+            palette = listOf(lerp(cs.primary, Color.White, 0.2f)) + Twilight.orbs,
+            focus = Twilight.focus,
+            label = Twilight.label,
+            labelBackground = Twilight.labelPill,
             labelStyle = labelStyle,
         )
     }
@@ -336,6 +341,7 @@ private fun CategoryFilterBar(
             selected = selected == null,
             onClick = { onSelect(null) },
             label = { Text("All · $total") },
+            colors = FilterChipDefaults.filterChipColors(containerColor = Color.White.copy(alpha = 0.14f)),
         )
         for (category in Category.entries) {
             val n = counts[category] ?: continue
@@ -347,7 +353,7 @@ private fun CategoryFilterBar(
                 label = { Text("${category.label} · $n") },
                 leadingIcon = { CategoryDot(category, 8.dp) },
                 colors = FilterChipDefaults.filterChipColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f),
+                    containerColor = Color.White.copy(alpha = 0.14f),
                     selectedContainerColor = Color(category.argb).copy(alpha = 0.3f),
                 ),
                 interactionSource = interaction,

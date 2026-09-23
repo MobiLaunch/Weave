@@ -101,9 +101,9 @@ fun ThoughtList(
                                 Modifier.size(36.dp).background(color.copy(alpha = 0.22f), CircleShape),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                val mood = note.mood
-                                if (mood != null) {
-                                    Text(mood.emoji, fontSize = 18.sp)
+                                val blend = note.blend
+                                if (blend != null) {
+                                    Text(blend.emoji, fontSize = if (blend.secondary != null) 13.sp else 18.sp)
                                 } else {
                                     Box(Modifier.size(12.dp).background(color, CircleShape))
                                 }

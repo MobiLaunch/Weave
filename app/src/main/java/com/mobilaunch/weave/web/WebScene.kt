@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.drawscope.rotate
 import com.mobilaunch.weave.data.Category
 import com.mobilaunch.weave.data.Mood
+import com.mobilaunch.weave.data.MoodBlend
 import com.mobilaunch.weave.data.Note
 import com.mobilaunch.weave.world.Biome
 import com.mobilaunch.weave.world.drawPlanet
@@ -42,6 +43,9 @@ import kotlin.random.Random
 @Immutable
 data class WebStyle(
     val background: Color,
+    val skyTop: Color,
+    val skyBottom: Color,
+    val nebulas: List<Color>,
     val glow: Color,
     val dust: Color,
     val palette: List<Color>,
@@ -84,6 +88,7 @@ class WebScene {
     private val snippets = HashMap<String, String>()
     private val phases = HashMap<String, Float>()
     private val moods = HashMap<String, Mood>()
+    private val blends = HashMap<String, MoodBlend>()
     private val categories = HashMap<String, Category>()
     private val dim = HashMap<String, Float>()
     private var clusters: Map<Category?, List<String>> = emptyMap()
@@ -128,12 +133,14 @@ class WebScene {
         parentOf.clear()
         snippets.clear()
         moods.clear()
+        blends.clear()
         categories.clear()
         for (n in next) {
             base[n.id] = n.pos
             parentOf[n.id] = n.parentId?.takeIf { it in ids }
-            snippets[n.id] = n.mood?.let { "${it.emoji}  ${n.snippet}" } ?: n.snippet
+            snippets[n.id] = n.blend?.let { "${it.emoji}  ${n.snippet}" } ?: n.snippet
             n.mood?.let { moods[n.id] = it }
+            n.blend?.let { blends[n.id] = it }
             n.category?.let { categories[n.id] = it }
             phases.getOrPut(n.id) { (n.id.hashCode() and 0xffff) / 65535f * 6.283f }
         }
@@ -395,8 +402,16 @@ class WebScene {
         camera.setViewport(size.width, size.height)
         val minDim = min(size.width, size.height)
 
-        // Backdrop: a soft nebula behind the web.
-        drawRect(style.background)
+        // Backdrop: a twilight sky with slow, drifting nebulas.
+        drawRect(Brush.verticalGradient(listOf(style.skyTop, style.skyBottom)))
+        for ((i, neb) in style.nebulas.withIndex()) {
+            val nc = Offset(
+                size.width * (0.5f + 0.38f * sin(t * 0.05f + i * 2.1f)),
+                size.height * (0.5f + 0.32f * cos(t * 0.04f + i * 1.7f)),
+            )
+            val nr = minDim * (0.75f + 0.12f * sin(t * 0.1f + i))
+            drawCircle(Brush.radialGradient(listOf(neb, Color.Transparent), center = nc, radius = nr), radius = nr, center = nc)
+        }
         val glowCenter = Offset(size.width / 2f, size.height * (0.45f + camera.offsetFrac))
         drawCircle(
             brush = Brush.radialGradient(listOf(style.glow, Color.Transparent), center = glowCenter, radius = minDim * 0.9f),
@@ -407,7 +422,7 @@ class WebScene {
         // Floating dust gives depth cues as the web turns.
         for (d in dust) {
             val p = camera.project(d.pos + centroid) ?: continue
-            val a = (0.10f + 0.12f * sin(t * 1.3f + d.twinkle)) * (6f / p.depth).coerceIn(0.2f, 1f)
+            val a = (0.2f + 0.22f * sin(t * 1.3f + d.twinkle)) * (6f / p.depth).coerceIn(0.25f, 1f)
             drawCircle(style.dust.copy(alpha = a.coerceIn(0f, 1f)), radius = max(0.6f, d.size * p.ppu * 0.012f), center = Offset(p.x, p.y))
         }
 
@@ -515,6 +530,8 @@ class WebScene {
                 r = r,
                 color = colorOf(id),
                 mood = moods[id],
+                second = blends[id]?.secondary,
+                mix = blends[id]?.mix ?: 0f,
                 t = t,
                 ph = phases[id] ?: 0f,
                 f = fade(p.depth) * (1f - 0.85f * d),
@@ -674,6 +691,8 @@ class WebScene {
         r: Float,
         color: Color,
         mood: Mood?,
+        second: Mood?,
+        mix: Float,
         t: Float,
         ph: Float,
         f: Float,
@@ -740,6 +759,8 @@ class WebScene {
                 detail = ((rr - 16f) / 24f).coerceIn(0f, 1f),
                 opacity = 0.3f + 0.7f * f,
                 sky = rr > 26f,
+                second = second?.let { Biome.of(it) },
+                mix = mix,
             )
             drawCircle(color.copy(alpha = 0.55f * f), radius = rr * 1.22f, center = c0, style = Stroke(max(1f, rr * 0.05f)))
         } else {

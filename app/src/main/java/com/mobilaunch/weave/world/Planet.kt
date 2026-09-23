@@ -30,15 +30,20 @@ enum class Biome(
     val accent: Color,
     val atmosphere: Color,
     val spin: Float,
+    /** How this biome describes itself when it's the lesser half of a mixed world. */
+    val touch: String,
 ) {
-    Stardust("A quiet rock, waiting for a feeling", Color(0xFF8E8A9A), Color(0xFF6B6779), Color(0xFFC9C4D6), Color(0xFFB9B4C7), 0.18f),
-    Meadow("Sunny meadow world", Color(0xFF4FA8F0), Color(0xFF5CC46A), Color(0xFFFFE082), Color(0xFF9FE3FF), 0.25f),
-    Lagoon("Tranquil lagoon", Color(0xFF3CC4C0), Color(0xFFF1D9A6), Color(0xFF2E9E6A), Color(0xFFB6F0EA), 0.12f),
-    Forest("Mystery mushroom forest", Color(0xFF2F3E6E), Color(0xFF3F7A5A), Color(0xFFFF6F61), Color(0xFFB39DDB), 0.2f),
-    Crystal("Crystal aurora world", Color(0xFF5B4BC4), Color(0xFFB39DFF), Color(0xFF7DF9FF), Color(0xFFE1BEE7), 0.3f),
-    Volcano("A world on fire", Color(0xFFB8321A), Color(0xFF2A1512), Color(0xFFFF8A1A), Color(0xFFFF5722), 0.35f),
-    Storm("Stormy water world", Color(0xFF1B3B6F), Color(0xFF2C5A8F), Color(0xFFE3F2FD), Color(0xFF5C7FA8), 0.22f),
+    Stardust("A quiet rock, waiting for a feeling", Color(0xFF8E8A9A), Color(0xFF6B6779), Color(0xFFC9C4D6), Color(0xFFB9B4C7), 0.18f, "dusted with stardust"),
+    Meadow("Sunny meadow world", Color(0xFF4FA8F0), Color(0xFF5CC46A), Color(0xFFFFE082), Color(0xFF9FE3FF), 0.25f, "with sunny meadows"),
+    Lagoon("Tranquil lagoon", Color(0xFF3CC4C0), Color(0xFFF1D9A6), Color(0xFF2E9E6A), Color(0xFFB6F0EA), 0.12f, "with calm lagoons"),
+    Forest("Mystery mushroom forest", Color(0xFF2F3E6E), Color(0xFF3F7A5A), Color(0xFFFF6F61), Color(0xFFB39DDB), 0.2f, "with mysterious mushrooms"),
+    Crystal("Crystal aurora world", Color(0xFF5B4BC4), Color(0xFFB39DFF), Color(0xFF7DF9FF), Color(0xFFE1BEE7), 0.3f, "under crystal auroras"),
+    Volcano("A world on fire", Color(0xFFB8321A), Color(0xFF2A1512), Color(0xFFFF8A1A), Color(0xFFFF5722), 0.35f, "with smouldering volcanoes"),
+    Storm("Stormy water world", Color(0xFF1B3B6F), Color(0xFF2C5A8F), Color(0xFFE3F2FD), Color(0xFF5C7FA8), 0.22f, "under passing storms"),
     ;
+
+    /** "Sunny meadow world under passing storms". */
+    fun titleWith(second: Biome?): String = if (second == null || second == this) title else "$title ${second.touch}"
 
     companion object {
         fun of(mood: Mood?): Biome = when (mood) {
@@ -90,17 +95,24 @@ fun DrawScope.drawPlanet(
     detail: Float = 1f,
     opacity: Float = 1f,
     sky: Boolean = true,
+    second: Biome? = null,
+    mix: Float = 0f,
 ) {
     if (r < 1f || opacity <= 0.01f) return
     fun Color.a(x: Float = 1f) = copy(alpha = (opacity * x * this.alpha).coerceIn(0f, 1f))
     val spin = t * biome.spin
+    // How strongly the second feeling shows: 0 = not at all, 0.5 = an even split.
+    val other = second?.takeIf { it != biome }
+    val share = if (other == null) 0f else (mix * 1.8f).coerceIn(0f, 0.9f)
+    val atmosphere = if (other == null) biome.atmosphere else lerp(biome.atmosphere, other.atmosphere, mix)
+    val ocean = if (other == null) biome.ocean else lerp(biome.ocean, other.ocean, mix * 0.8f)
 
     // Atmosphere.
-    val pulse = if (biome == Biome.Volcano) 0.85f + 0.15f * sin(t * 6f) else 1f
+    val pulse = if (biome == Biome.Volcano || other == Biome.Volcano) 0.85f + 0.15f * sin(t * 6f) else 1f
     drawCircle(
         brush = Brush.radialGradient(
-            0.55f to biome.atmosphere.a(0.35f * pulse),
-            0.7f to biome.atmosphere.a(0.18f * pulse),
+            0.55f to atmosphere.a(0.35f * pulse),
+            0.7f to atmosphere.a(0.18f * pulse),
             1f to Color.Transparent,
             center = c,
             radius = r * 1.6f,
@@ -108,13 +120,16 @@ fun DrawScope.drawPlanet(
         radius = r * 1.6f,
         center = c,
     )
-    if (sky) skyBehind(c, r, biome, t, opacity)
+    if (sky) {
+        skyBehind(c, r, biome, t, opacity)
+        if (other != null) skyBehind(c, r, other, t, opacity * share)
+    }
 
     // The globe itself, shaded like a sphere.
     drawCircle(
         brush = Brush.radialGradient(
-            0f to lerp(biome.ocean, Color.White, 0.25f).a(),
-            1f to lerp(biome.ocean, Color.Black, 0.35f).a(),
+            0f to lerp(ocean, Color.White, 0.25f).a(),
+            1f to lerp(ocean, Color.Black, 0.35f).a(),
             center = c + Offset(-0.35f * r, -0.35f * r),
             radius = r * 1.5f,
         ),
@@ -123,7 +138,8 @@ fun DrawScope.drawPlanet(
     )
     val globe = Path().apply { addOval(Rect(c, r)) }
     clipPath(globe) {
-        surface(c, r, biome, t, spin, opacity)
+        surface(c, r, biome, t, spin, opacity, fraction = 1f)
+        if (other != null) surface(c, r, other, t, t * other.spin, opacity, fraction = share)
         // Night side.
         drawCircle(
             brush = Brush.radialGradient(
@@ -136,14 +152,22 @@ fun DrawScope.drawPlanet(
             center = c,
         )
     }
-    drawCircle(lerp(biome.atmosphere, Color.White, 0.3f).a(0.35f), radius = r, center = c, style = Stroke(max(0.7f, r * 0.025f)))
+    drawCircle(lerp(atmosphere, Color.White, 0.3f).a(0.35f), radius = r, center = c, style = Stroke(max(0.7f, r * 0.025f)))
 
-    if (detail > 0f) rimLife(c, r, biome, t, detail, opacity)
-    if (sky) skyFront(c, r, biome, t, opacity)
+    if (detail > 0f) {
+        rimLife(c, r, biome, t, detail, opacity, offset = 0f)
+        // The second feeling's landmarks stand between the first's.
+        if (other != null) rimLife(c, r, other, t, detail * share, opacity, offset = 0.5f)
+    }
+    if (sky) {
+        skyFront(c, r, biome, t, opacity)
+        if (other != null) skyFront(c, r, other, t, opacity * share)
+    }
 }
 
 /** Continents, seas, craters and lava plates sliding by as the globe turns. */
-private fun DrawScope.surface(c: Offset, r: Float, b: Biome, t: Float, spin: Float, opacity: Float) {
+private fun DrawScope.surface(c: Offset, r: Float, b: Biome, t: Float, spin: Float, opacity: Float, fraction: Float) {
+    if (fraction <= 0f) return
     fun Color.a(x: Float = 1f) = copy(alpha = (opacity * x * this.alpha).coerceIn(0f, 1f))
     // Storm clouds and ocean swells move in bands.
     if (b == Biome.Storm) {
@@ -152,11 +176,13 @@ private fun DrawScope.surface(c: Offset, r: Float, b: Biome, t: Float, spin: Flo
             val shift = ((t * 0.25f * (1 + i % 2) + i * 0.37f) % 1f) * 2f * r
             for (k in -1..1) {
                 val x = c.x - r + shift + k * 2f * r
+                if (i / 5f > fraction) continue
                 drawArc(b.land.a(0.8f), 200f, 140f, false, topLeft = Offset(x - r * 0.3f, y - r * 0.08f), size = Size(r * 0.6f, r * 0.2f), style = Stroke(r * 0.03f, cap = StrokeCap.Round))
             }
         }
     }
     for (s in spotsFor(b)) {
+        if (s.seed > fraction) continue
         val a = s.lon + spin
         val facing = cos(a)
         if (facing < -0.15f) continue
@@ -207,8 +233,9 @@ private fun DrawScope.surface(c: Offset, r: Float, b: Biome, t: Float, spin: Flo
 }
 
 /** Trees, animals and landmarks standing on the horizon, popping in as [detail] grows. */
-private fun DrawScope.rimLife(c: Offset, r: Float, b: Biome, t: Float, detail: Float, opacity: Float) {
+private fun DrawScope.rimLife(c: Offset, r: Float, b: Biome, t: Float, detail: Float, opacity: Float, offset: Float) {
     val things = rimPlan(b)
+    val slot = 2f * PI.toFloat() / things.size
     val k = r / 100f
     val turn = t * 0.12f
     val shown = detail * things.size
@@ -216,7 +243,7 @@ private fun DrawScope.rimLife(c: Offset, r: Float, b: Biome, t: Float, detail: F
         val appear = (shown - i).coerceIn(0f, 1f)
         if (appear <= 0f) continue
         val pop = if (appear < 1f) appear * (1f + 0.3f * sin(appear * PI.toFloat())) else 1f
-        val ang = thing.angle + turn
+        val ang = thing.angle + turn + offset * slot
         val base = c + Offset(cos(ang), sin(ang)) * (r * 0.97f)
         translate(base.x, base.y) {
             rotate(degrees = ang * 180f / PI.toFloat() + 90f, pivot = Offset.Zero) {

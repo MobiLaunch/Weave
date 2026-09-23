@@ -13,7 +13,11 @@ data class Note(
     val z: Float,
     val mood: Mood? = null,
     val category: Category? = null,
+    val mood2: Mood? = null,
+    val moodMix: Float = 0f,
 ) {
+    val blend: MoodBlend? get() = mood?.let { MoodBlend(it, mood2, if (mood2 != null) moodMix else 0f) }
+
     val pos: Vec3 get() = Vec3(x, y, z)
 
     val snippet: String

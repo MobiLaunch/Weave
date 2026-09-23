@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mobilaunch.weave.data.Category
 import com.mobilaunch.weave.data.Mood
+import com.mobilaunch.weave.data.MoodBlend
 import kotlinx.coroutines.launch
 
 /** Squishes a little while pressed and springs back on release. */
@@ -65,20 +66,21 @@ fun Modifier.pressBounce(interactionSource: MutableInteractionSource): Modifier 
  */
 @Composable
 fun MoodPicker(
-    selected: Mood?,
-    onSelect: (Mood?) -> Unit,
+    selected: List<Mood>,
+    onSelect: (List<Mood>) -> Unit,
     modifier: Modifier = Modifier,
     auto: Boolean = false,
-    sensed: Mood? = null,
+    sensed: MoodBlend? = null,
     onAuto: (() -> Unit)? = null,
 ) {
     Column(modifier) {
         Text(
             when {
-                auto && sensed != null -> "Sensing ${sensed.label.lowercase()} – tap a mood to choose your own"
+                auto && sensed != null -> "Sensing ${sensed.emoji} ${sensed.label.lowercase()} · tap moods to choose your own"
                 auto -> "Sensing your mood as you write…"
-                selected != null -> "Feeling ${selected.label.lowercase()}"
-                else -> "How does this feel?"
+                selected.size == 2 -> "Feeling ${MoodBlend(selected[0], selected[1]).label.lowercase()}"
+                selected.size == 1 -> "Feeling ${selected[0].label.lowercase()} · add a second for mixed feelings"
+                else -> "How does this feel? Pick up to two"
             },
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -93,9 +95,18 @@ fun MoodPicker(
                 MoodBubble("🪄", "Sense my mood", selected = auto, hinted = false) { onAuto() }
             }
             for (mood in Mood.entries) {
-                val isSelected = !auto && mood == selected
-                MoodBubble(mood.emoji, mood.label, isSelected, hinted = auto && mood == sensed) {
-                    onSelect(if (isSelected) null else mood)
+                val isSelected = !auto && mood in selected
+                val hinted = auto && (mood == sensed?.primary || mood == sensed?.secondary)
+                MoodBubble(mood.emoji, mood.label, isSelected, hinted) {
+                    onSelect(
+                        when {
+                            isSelected -> selected - mood
+                            auto || selected.isEmpty() -> listOf(mood)
+                            selected.size == 1 -> selected + mood
+                            // Already two: keep the newer one and add this.
+                            else -> listOf(selected[1], mood)
+                        },
+                    )
                 }
             }
         }

@@ -43,7 +43,7 @@ class NoteRepository(file: File) {
         }
     }
 
-    fun create(text: String, parentId: String?, mood: Mood?, category: Category?): Note {
+    fun create(text: String, parentId: String?, blend: MoodBlend?, category: Category?): Note {
         val all = _notes.value
         val parent = all.firstOrNull { it.id == parentId }
         val pos = WebLayout.placeChild(parent?.pos, all.map { it.pos })
@@ -55,19 +55,28 @@ class NoteRepository(file: File) {
             updatedAt = now,
             parentId = parent?.id,
             x = pos.x, y = pos.y, z = pos.z,
-            mood = mood,
+            mood = blend?.primary,
             category = category,
+            mood2 = blend?.secondary,
+            moodMix = blend?.mix ?: 0f,
         )
         commit(all + note)
         return note
     }
 
-    fun update(id: String, text: String, mood: Mood?, category: Category?) {
+    fun update(id: String, text: String, blend: MoodBlend?, category: Category?) {
         val trimmed = text.trim()
         commit(
             _notes.value.map {
-                if (it.id == id && (it.text != trimmed || it.mood != mood || it.category != category)) {
-                    it.copy(text = trimmed, mood = mood, category = category, updatedAt = System.currentTimeMillis())
+                if (it.id == id && (it.text != trimmed || it.blend != blend || it.category != category)) {
+                    it.copy(
+                        text = trimmed,
+                        mood = blend?.primary,
+                        mood2 = blend?.secondary,
+                        moodMix = blend?.mix ?: 0f,
+                        category = category,
+                        updatedAt = System.currentTimeMillis(),
+                    )
                 } else {
                     it
                 }
@@ -121,6 +130,8 @@ class NoteRepository(file: File) {
                     z = o.getDouble("z").toFloat(),
                     mood = Mood.fromKey(o.optString("mood").ifEmpty { null }),
                     category = Category.fromKey(o.optString("category").ifEmpty { null }),
+                    mood2 = Mood.fromKey(o.optString("mood2").ifEmpty { null }),
+                    moodMix = o.optDouble("moodMix", 0.0).toFloat(),
                 )
             }
         }
@@ -143,7 +154,9 @@ class NoteRepository(file: File) {
                     .put("y", n.y.toDouble())
                     .put("z", n.z.toDouble())
                     .put("mood", n.mood?.key ?: JSONObject.NULL)
-                    .put("category", n.category?.key ?: JSONObject.NULL),
+                    .put("category", n.category?.key ?: JSONObject.NULL)
+                    .put("mood2", n.mood2?.key ?: JSONObject.NULL)
+                    .put("moodMix", n.moodMix.toDouble()),
             )
         }
         val out = try {

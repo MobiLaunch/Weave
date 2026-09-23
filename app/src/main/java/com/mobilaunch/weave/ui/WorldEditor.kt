@@ -73,6 +73,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mobilaunch.weave.data.Category
 import com.mobilaunch.weave.data.Mood
+import com.mobilaunch.weave.data.MoodBlend
+import com.mobilaunch.weave.ui.theme.Twilight
 import com.mobilaunch.weave.data.MoodSense
 import com.mobilaunch.weave.world.Biome
 import com.mobilaunch.weave.world.drawPlanet
@@ -102,26 +104,31 @@ fun WorldEditor(
     createdAt: Long?,
     updatedAt: Long?,
     branchFrom: String?,
-    initialMood: Mood?,
+    initialBlend: MoodBlend?,
     initialCategory: Category?,
     origin: Rect?,
     flyTarget: () -> Offset?,
     orbRadiusPx: Float,
-    onSave: (text: String, mood: Mood?, category: Category?) -> Unit,
+    onSave: (text: String, blend: MoodBlend?, category: Category?) -> Unit,
     onDelete: () -> Unit,
     onClosed: () -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf(initialText) }
-    var chosenMood by rememberSaveable { mutableStateOf(initialMood) }
-    var auto by rememberSaveable { mutableStateOf(initialMood == null) }
+    // Hand-picked moods (up to two), saved as keys so they survive rotation.
+    var chosenKeys by rememberSaveable {
+        mutableStateOf(listOfNotNull(initialBlend?.primary, initialBlend?.secondary).joinToString(",") { it.key })
+    }
+    val chosen = remember(chosenKeys) { chosenKeys.split(",").mapNotNull { Mood.fromKey(it) } }
+    var auto by rememberSaveable { mutableStateOf(initialBlend == null) }
     var category by rememberSaveable { mutableStateOf(initialCategory) }
     var exit by remember { mutableStateOf<WorldExit?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     var planetArea by remember { mutableStateOf<Rect?>(null) }
 
-    val sensed = remember(text) { MoodSense.detect(text) }
-    val mood = if (auto) sensed else chosenMood
-    val biome = Biome.of(mood)
+    val sensed = remember(text) { MoodSense.sense(text) }
+    val blend = if (auto) sensed else chosen.firstOrNull()?.let { MoodBlend(it, chosen.getOrNull(1), if (chosen.size > 1) 0.42f else 0f) }
+    val world = World(Biome.of(blend?.primary), blend?.secondary?.let { Biome.of(it) })
+    val mix by animateFloatAsState(blend?.mix ?: 0f, tween(700), label = "mix")
 
     val view = LocalView.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -129,8 +136,8 @@ fun WorldEditor(
     val open = remember { Animatable(0f) }
     val fly = remember { Animatable(0f) }
     val morph = remember { Animatable(1f) }
-    var shownBiome by remember { mutableStateOf(biome) }
-    var fromBiome by remember { mutableStateOf<Biome?>(null) }
+    var shownWorld by remember { mutableStateOf(world) }
+    var fromWorld by remember { mutableStateOf<World?>(null) }
     val time = remember { mutableFloatStateOf(0f) }
     val growth by animateFloatAsState((text.length / 180f).coerceIn(0f, 1f), tween(600), label = "growth")
     val stars = remember {
@@ -151,15 +158,15 @@ fun WorldEditor(
             focusRequester.requestFocus()
         }
     }
-    // The world reshapes itself whenever the mood changes.
-    LaunchedEffect(biome) {
-        if (biome != shownBiome) {
-            fromBiome = shownBiome
-            shownBiome = biome
+    // The world reshapes itself whenever the feelings change.
+    LaunchedEffect(world) {
+        if (world != shownWorld) {
+            fromWorld = shownWorld
+            shownWorld = world
             view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             morph.snapTo(0f)
             morph.animateTo(1f, tween(750, easing = FastOutSlowInEasing))
-            fromBiome = null
+            fromWorld = null
         }
     }
     LaunchedEffect(exit) {
@@ -179,7 +186,6 @@ fun WorldEditor(
     }
     BackHandler(enabled = exit == null) { exit = WorldExit.Dismiss }
 
-    val night = MaterialTheme.colorScheme.surfaceContainerLowest
     val seed = MaterialTheme.colorScheme.primaryContainer
     val saveInteraction = remember { MutableInteractionSource() }
 
@@ -199,19 +205,29 @@ fun WorldEditor(
                     val o = open.value
                     val f = fly.value
                     val fade = 1f - smoothstep(0.12f, 0.6f, f)
-                    drawRect(lerp(seed, night, smoothstep(0f, 0.55f, o)).copy(alpha = fade))
+                    // A bright twilight tinted by the world's own atmosphere.
+                    val tint = shownWorld.primary.atmosphere
+                    drawRect(
+                        Brush.verticalGradient(
+                            listOf(
+                                lerp(Twilight.top, tint, 0.35f).copy(alpha = fade),
+                                Twilight.bottom.copy(alpha = fade),
+                            ),
+                        ),
+                    )
+                    drawRect(seed.copy(alpha = fade * (1f - smoothstep(0f, 0.55f, o))))
                     val sky = smoothstep(0.3f, 1f, o) * fade
                     if (sky > 0f) {
                         val c = planetArea?.center ?: center
                         drawCircle(
-                            Brush.radialGradient(listOf(shownBiome.atmosphere.copy(alpha = 0.28f * sky), Color.Transparent), center = c, radius = size.maxDimension * 0.6f),
+                            Brush.radialGradient(listOf(tint.copy(alpha = 0.45f * sky), Color.Transparent), center = c, radius = size.maxDimension * 0.6f),
                             radius = size.maxDimension * 0.6f,
                             center = c,
                         )
                         val t = time.floatValue
                         for (s in stars) {
                             val tw = 0.35f + 0.65f * (0.5f + 0.5f * sin(t * 1.6f + s.phase))
-                            drawCircle(Color.White.copy(alpha = 0.55f * tw * sky), radius = s.size, center = Offset(s.x * size.width, s.y * size.height))
+                            drawCircle(Color.White.copy(alpha = 0.7f * tw * sky), radius = s.size, center = Offset(s.x * size.width, s.y * size.height))
                         }
                     }
                 },
@@ -254,18 +270,27 @@ fun WorldEditor(
                 )
 
                 AnimatedContent(
-                    targetState = biome,
+                    targetState = blend to world,
                     transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(250)) },
-                    label = "biomeTitle",
+                    contentKey = { it.second },
+                    label = "worldTitle",
                     modifier = Modifier.fillMaxWidth(),
-                ) { b ->
-                    Text(
-                        (mood?.let { it.emoji + "  " } ?: "") + b.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = lerp(b.atmosphere, Color.White, 0.35f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                ) { (b, w) ->
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (b != null) {
+                            Text(
+                                "${b.emoji}  ${b.label}",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = Color.White,
+                            )
+                        }
+                        Text(
+                            w.primary.titleWith(w.secondary),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = lerp(w.primary.atmosphere, Color.White, 0.55f),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
                 if (isNew && branchFrom != null) {
                     Text(
@@ -296,10 +321,10 @@ fun WorldEditor(
                         .focusRequester(focusRequester),
                 )
                 MoodPicker(
-                    selected = chosenMood,
-                    onSelect = {
-                        chosenMood = it
-                        auto = it == null
+                    selected = chosen,
+                    onSelect = { picked ->
+                        chosenKeys = picked.joinToString(",") { it.key }
+                        auto = picked.isEmpty()
                     },
                     auto = auto,
                     sensed = sensed,
@@ -313,7 +338,7 @@ fun WorldEditor(
                     onClick = {
                         if (exit == null) {
                             view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                            onSave(text.trim(), mood, category)
+                            onSave(text.trim(), blend, category)
                             exit = WorldExit.IntoWeb
                         }
                     },
@@ -348,8 +373,9 @@ fun WorldEditor(
                 val opacity = appear * (1f - smoothstep(0.88f, 1f, f))
                 val detail = (0.2f + growth).coerceAtMost(1f) * (1f - f)
                 val sky = r > 40f
-                fromBiome?.let { drawPlanet(c, r, it, t, detail, opacity, sky) }
-                drawPlanet(c, r, shownBiome, t, detail, opacity * if (fromBiome != null) m else 1f, sky)
+                fromWorld?.let { drawPlanet(c, r, it.primary, t, detail, opacity, sky, it.secondary, mix) }
+                val w = shownWorld
+                drawPlanet(c, r, w.primary, t, detail, opacity * if (fromWorld != null) m else 1f, sky, w.secondary, mix)
             }
         }
     }
@@ -372,6 +398,9 @@ fun WorldEditor(
         )
     }
 }
+
+/** Which biomes make up the world: its main feeling and, for mixed feelings, a second. */
+private data class World(val primary: Biome, val secondary: Biome?)
 
 private class Star(val x: Float, val y: Float, val size: Float, val phase: Float)
 
