@@ -19,6 +19,13 @@ colors through Material You.
 Everything stays on the device (`files/weave.json`). The sounds are synthesized in code,
 so there are no audio assets.
 
+## Install on your phone
+
+Open **https://github.com/MobiLaunch/Weave/releases/latest/download/weave.apk** in Chrome on the
+phone (while the repo is private you need to be signed in to GitHub in that browser). When the
+download finishes, tap it. The first time, Android asks you to allow installs from Chrome. Turn
+that on, go back and tap **Install**.
+
 ## Build & run
 
 Requirements: Android Studio Ladybug or newer (or JDK 17 plus the Android SDK with API 35).
@@ -32,7 +39,8 @@ The release build is signed with the debug key so it installs directly. Add a re
 config before publishing.
 
 CI (`.github/workflows/android.yml`) builds a debug APK on every push and PR
-and uploads it as the `weave-debug-apk` artifact.
+and uploads it as the `weave-debug-apk` artifact. Pushes to `main` also publish it as a
+GitHub Release (`weave.apk`).
 
 ## Code map
 
