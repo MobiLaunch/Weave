@@ -7,6 +7,9 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -28,6 +31,8 @@ import kotlin.math.PI
 
 private enum class GestureMode { Pending, Rotate, Transform, DragNode }
 
+private const val DOUBLE_TAP_MS = 320L
+
 /**
  * The interactive 3D web. One finger spins it, two fingers pinch-zoom and twist it,
  * a tap opens a thought and a long press picks a thought up so it can be re-attached elsewhere.
@@ -40,6 +45,8 @@ fun WebCanvas(
     onTapNote: (String?) -> Unit,
     onPickUp: () -> Unit,
     onMoved: (MoveResult) -> Unit,
+    onTick: () -> Unit,
+    onDoubleTapEmpty: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val measurer = rememberTextMeasurer()
@@ -51,6 +58,14 @@ fun WebCanvas(
     val tap by rememberUpdatedState(onTapNote)
     val pickUp by rememberUpdatedState(onPickUp)
     val moved by rememberUpdatedState(onMoved)
+    val tick by rememberUpdatedState(onTick)
+    val doubleTap by rememberUpdatedState(onDoubleTapEmpty)
+
+    DisposableEffect(scene) {
+        scene.onCandidateChange = { tick() }
+        onDispose { scene.onCandidateChange = null }
+    }
+    var lastEmptyTap by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(scene) {
         while (true) withFrameNanos { scene.tick(it) }
@@ -91,7 +106,20 @@ fun WebCanvas(
                         val pressed = event.changes.filter { it.pressed }
                         if (pressed.isEmpty()) {
                             when (mode) {
-                                GestureMode.Pending -> if (canInteract) tap(hit)
+                                GestureMode.Pending -> if (canInteract) {
+                                    val up = event.changes.first().uptimeMillis
+                                    if (hit != null) {
+                                        scene.pop(hit)
+                                        tick()
+                                        tap(hit)
+                                    } else if (up - lastEmptyTap < DOUBLE_TAP_MS) {
+                                        lastEmptyTap = 0L
+                                        doubleTap()
+                                    } else {
+                                        lastEmptyTap = up
+                                        tap(null)
+                                    }
+                                }
                                 GestureMode.Rotate -> {
                                     val v = tracker.calculateVelocity()
                                     scene.fling(v.x, v.y)
@@ -105,7 +133,11 @@ fun WebCanvas(
 
                         if (pressed.size >= 2 && mode != GestureMode.DragNode) {
                             mode = GestureMode.Transform
+                            val before = scene.camera.distance
                             scene.camera.zoomBy(event.calculateZoom())
+                            val after = scene.camera.distance
+                            val atEdge = after <= Camera.MIN_DISTANCE || after >= Camera.MAX_DISTANCE
+                            if (atEdge && before != after) tick()
                             scene.camera.roll(-event.calculateRotation() * (PI.toFloat() / 180f))
                             val pan = event.calculatePan()
                             scene.rotateByDrag(pan.x * 0.5f, pan.y * 0.5f)

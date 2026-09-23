@@ -14,6 +14,9 @@ colors through Material You.
 | **Explore in 3D** | Drag to spin the web freely in any direction. Pinch to zoom, twist two fingers to roll it, and fling it to keep it turning. It slowly drifts when left alone. |
 | **Weave animation** | When you save a new note, the card shrinks and flies into the web while the camera pulls back. The thought springs out from its parent, strands reach over from its neighbours, and a small spider web spins up around it with a soft chime. |
 | **Snap to move** | Long-press a thought to pick it up (along with its branches), then drag it. A dashed line previews where it will attach. Let go and the old strand snaps and recoils, the thought springs into place and the new strand twangs. A shock wave runs through the web, with a snap sound and haptics. |
+| **Living orbs** | Every orb breathes, shimmers and slowly swirls. Its mood gives it a personality: 😊 joyful orbs bounce with sparkles, 😌 calm ones breathe slowly, 🤔 curious ones wobble, ✨ inspired ones twinkle with star glints, 🔥 fired-up ones flicker and throw embers, and 🌧️ blue ones sink gently and drip. |
+| **Moods & categories** | Pick a mood and a category (Ideas, Personal, Work, Dreams, To-do, Memories) for any thought. Categories colour the orbs. The filter chips under the title light up one category, dim the rest and fly the camera over to it. New thoughts inherit the category you're viewing, or their parent's. |
+| **Micro-interactions** | Orbs pop when tapped. The snap target swells and ticks as you drag past it. Pinching bumps at the zoom limits, and double-tapping empty space recenters. Buttons squish when pressed, mood emojis hop, and the thought count rolls. |
 | **All thoughts** | The list button shows every thought with its timestamps. Pick one to fly to it. |
 
 Everything stays on the device (`files/weave.json`). The sounds are synthesized in code,

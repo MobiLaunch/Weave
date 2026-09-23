@@ -43,7 +43,7 @@ class NoteRepository(file: File) {
         }
     }
 
-    fun create(text: String, parentId: String?): Note {
+    fun create(text: String, parentId: String?, mood: Mood?, category: Category?): Note {
         val all = _notes.value
         val parent = all.firstOrNull { it.id == parentId }
         val pos = WebLayout.placeChild(parent?.pos, all.map { it.pos })
@@ -55,16 +55,22 @@ class NoteRepository(file: File) {
             updatedAt = now,
             parentId = parent?.id,
             x = pos.x, y = pos.y, z = pos.z,
+            mood = mood,
+            category = category,
         )
         commit(all + note)
         return note
     }
 
-    fun update(id: String, text: String) {
+    fun update(id: String, text: String, mood: Mood?, category: Category?) {
         val trimmed = text.trim()
         commit(
             _notes.value.map {
-                if (it.id == id && it.text != trimmed) it.copy(text = trimmed, updatedAt = System.currentTimeMillis()) else it
+                if (it.id == id && (it.text != trimmed || it.mood != mood || it.category != category)) {
+                    it.copy(text = trimmed, mood = mood, category = category, updatedAt = System.currentTimeMillis())
+                } else {
+                    it
+                }
             },
         )
     }
@@ -113,6 +119,8 @@ class NoteRepository(file: File) {
                     x = o.getDouble("x").toFloat(),
                     y = o.getDouble("y").toFloat(),
                     z = o.getDouble("z").toFloat(),
+                    mood = Mood.fromKey(o.optString("mood").ifEmpty { null }),
+                    category = Category.fromKey(o.optString("category").ifEmpty { null }),
                 )
             }
         }
@@ -133,7 +141,9 @@ class NoteRepository(file: File) {
                     .put("parentId", n.parentId ?: JSONObject.NULL)
                     .put("x", n.x.toDouble())
                     .put("y", n.y.toDouble())
-                    .put("z", n.z.toDouble()),
+                    .put("z", n.z.toDouble())
+                    .put("mood", n.mood?.key ?: JSONObject.NULL)
+                    .put("category", n.category?.key ?: JSONObject.NULL),
             )
         }
         val out = try {

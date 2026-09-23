@@ -1,6 +1,9 @@
 package com.mobilaunch.weave.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
@@ -53,6 +56,8 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mobilaunch.weave.data.Category
+import com.mobilaunch.weave.data.Mood
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
@@ -72,13 +77,22 @@ fun NoteEditor(
     createdAt: Long?,
     updatedAt: Long?,
     branchFrom: String?,
+    initialMood: Mood?,
+    initialCategory: Category?,
     flyTarget: () -> Offset?,
-    onSave: (String) -> Unit,
+    onSave: (text: String, mood: Mood?, category: Category?) -> Unit,
     onDelete: () -> Unit,
     onClosed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var text by rememberSaveable { mutableStateOf(initialText) }
+    var mood by rememberSaveable { mutableStateOf(initialMood) }
+    var category by rememberSaveable { mutableStateOf(initialCategory) }
+    val accent by animateColorAsState(
+        category?.let { Color(it.argb) } ?: MaterialTheme.colorScheme.outlineVariant,
+        label = "editorAccent",
+    )
+    val saveInteraction = remember { MutableInteractionSource() }
     val enter = remember { Animatable(0f) }
     val exit = remember { Animatable(0f) }
     var exitKind by remember { mutableStateOf<EditorExit?>(null) }
@@ -155,6 +169,7 @@ fun NoteEditor(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp,
             shadowElevation = 16.dp,
+            border = BorderStroke(1.5.dp, accent.copy(alpha = 0.6f)),
         ) {
             Column(Modifier.padding(start = 24.dp, end = 12.dp, top = 16.dp, bottom = 16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -195,9 +210,11 @@ fun NoteEditor(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(end = 12.dp, top = 4.dp)
-                        .heightIn(min = 140.dp, max = 320.dp)
+                        .heightIn(min = 110.dp, max = 260.dp)
                         .focusRequester(focusRequester),
                 )
+                MoodPicker(mood, { mood = it }, Modifier.padding(top = 4.dp, end = 12.dp))
+                CategoryPicker(category, { category = it }, Modifier.padding(top = 10.dp, end = 12.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 8.dp, end = 12.dp),
@@ -216,11 +233,13 @@ fun NoteEditor(
                     Button(
                         onClick = {
                             if (exitKind == null) {
-                                onSave(text.trim())
+                                onSave(text.trim(), mood, category)
                                 close(EditorExit.IntoWeb)
                             }
                         },
                         enabled = text.isNotBlank() && exitKind == null,
+                        interactionSource = saveInteraction,
+                        modifier = Modifier.pressBounce(saveInteraction),
                     ) {
                         Text(if (isNew) "Weave it in" else "Save")
                     }

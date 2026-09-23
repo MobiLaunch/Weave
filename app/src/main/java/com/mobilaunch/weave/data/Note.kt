@@ -11,6 +11,8 @@ data class Note(
     val x: Float,
     val y: Float,
     val z: Float,
+    val mood: Mood? = null,
+    val category: Category? = null,
 ) {
     val pos: Vec3 get() = Vec3(x, y, z)
 

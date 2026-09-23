@@ -2,6 +2,8 @@ package com.mobilaunch.weave
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import com.mobilaunch.weave.data.Category
+import com.mobilaunch.weave.data.Mood
 import com.mobilaunch.weave.data.Note
 import com.mobilaunch.weave.data.NoteRepository
 import com.mobilaunch.weave.web.MoveResult
@@ -14,9 +16,11 @@ class WeaveViewModel(app: Application) : AndroidViewModel(app) {
 
     val notes: StateFlow<List<Note>> = repository.notes
 
-    fun createNote(text: String, parentId: String?): Note = repository.create(text, parentId)
+    fun createNote(text: String, parentId: String?, mood: Mood?, category: Category?): Note =
+        repository.create(text, parentId, mood, category)
 
-    fun updateNote(id: String, text: String) = repository.update(id, text)
+    fun updateNote(id: String, text: String, mood: Mood?, category: Category?) =
+        repository.update(id, text, mood, category)
 
     fun deleteNote(id: String) = repository.delete(id)
 

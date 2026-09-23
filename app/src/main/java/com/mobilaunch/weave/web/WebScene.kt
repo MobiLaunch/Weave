@@ -12,6 +12,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.lerp
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
@@ -22,6 +23,9 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.drawscope.rotate
+import com.mobilaunch.weave.data.Category
+import com.mobilaunch.weave.data.Mood
 import com.mobilaunch.weave.data.Note
 import kotlin.math.PI
 import kotlin.math.abs
@@ -62,6 +66,13 @@ class WebScene {
     var isDragging by mutableStateOf(false)
         private set
 
+    /** Only thoughts in this category stay lit; the rest fade back. */
+    var filter by mutableStateOf<Category?>(null)
+        private set
+
+    /** Fires when a dragged thought starts pointing at a different snap target. */
+    var onCandidateChange: (() -> Unit)? = null
+
     // Snapshot of the web.
     private var synced: List<Note>? = null
     private var notes: List<Note> = emptyList()
@@ -70,6 +81,9 @@ class WebScene {
     private val generation = HashMap<String, Int>()
     private val snippets = HashMap<String, String>()
     private val phases = HashMap<String, Float>()
+    private val moods = HashMap<String, Mood>()
+    private val categories = HashMap<String, Category>()
+    private val dim = HashMap<String, Float>()
     private var silk: List<Pair<String, String>> = emptyList()
     private var centroid = Vec3.ZERO
     private var radius = 1f
@@ -78,6 +92,7 @@ class WebScene {
     private val spawns = HashMap<String, Long>()
     private var snap: SnapFx? = null
     private val ripples = ArrayList<Ripple>()
+    private val pops = HashMap<String, Long>()
     private var drag: DragState? = null
 
     // Clock.
@@ -109,10 +124,14 @@ class WebScene {
         base.clear()
         parentOf.clear()
         snippets.clear()
+        moods.clear()
+        categories.clear()
         for (n in next) {
             base[n.id] = n.pos
             parentOf[n.id] = n.parentId?.takeIf { it in ids }
-            snippets[n.id] = n.snippet
+            snippets[n.id] = n.mood?.let { "${it.emoji}  ${n.snippet}" } ?: n.snippet
+            n.mood?.let { moods[n.id] = it }
+            n.category?.let { categories[n.id] = it }
             phases.getOrPut(n.id) { (n.id.hashCode() and 0xffff) / 65535f * 6.283f }
         }
         generation.clear()
@@ -120,10 +139,35 @@ class WebScene {
         silk = WebLayout.silkLinks(base, parentOf)
         centroid = WebLayout.centroid(base.values)
         radius = base.values.maxOfOrNull { it.distanceTo(centroid) } ?: 0f
+        dim.keys.retainAll(ids)
         if (focusedId != null && focusedId !in ids) focusedId = null
     }
 
-    fun colorIndexOf(id: String): Int = generation[id] ?: 0
+    /** A thought's orb colour: its category's, or a theme colour by how deep in its branch it sits. */
+    fun colorFor(id: String, style: WebStyle): Color =
+        categories[id]?.let { Color(it.argb) } ?: style.palette[(generation[id] ?: 0) % style.palette.size]
+
+    private fun dimOf(id: String) = dim[id] ?: 0f
+
+    private fun dimTarget(id: String): Float {
+        val f = filter ?: return 0f
+        return if (categories[id] == f) 0f else 1f
+    }
+
+    /** Lights up one category (or all, with null) and glides over to it. */
+    fun applyFilter(category: Category?) {
+        filter = category
+        focusedId = null
+        val points = if (category == null) base.values.toList() else base.filterKeys { categories[it] == category }.values.toList()
+        if (points.isEmpty()) return
+        val c = WebLayout.centroid(points)
+        camera.animateTo(center = c, distance = fitDistance(c, points), offsetFrac = 0f, durationMs = 1000)
+    }
+
+    /** A quick squash-and-stretch on a tapped orb. */
+    fun pop(id: String) {
+        pops[id] = frameNanos
+    }
 
     fun screenPos(id: String): Offset? = projected[id]?.let { Offset(it.x, it.y) }
 
@@ -151,6 +195,10 @@ class WebScene {
     }
 
     fun recenter() {
+        if (filter != null) {
+            applyFilter(filter)
+            return
+        }
         focusedId = null
         camera.animateTo(center = centroid, distance = fitDistance(centroid, base.values), offsetFrac = 0f, durationMs = 1100)
     }
@@ -198,6 +246,7 @@ class WebScene {
         var best: String? = null
         var bestD = Float.MAX_VALUE
         for ((id, p) in projected) {
+            if (dimOf(id) > 0.5f) continue
             val r = NODE_R * p.ppu
             val d = sqrt((p.x - pos.x) * (p.x - pos.x) + (p.y - pos.y) * (p.y - pos.y))
             if (d <= max(r * 1.9f, MIN_HIT_PX) && d < bestD) {
@@ -221,7 +270,9 @@ class WebScene {
         val d = drag ?: return
         d.offset = camera.screenDeltaToWorld(at.x - d.startScreen.x, at.y - d.startScreen.y, d.depth)
         val start = base[d.id] ?: return
+        val previous = d.candidate
         d.candidate = camera.project(start + d.offset)?.let { nearestOnScreen(it, d.subtree) }
+        if (d.candidate != null && d.candidate != previous) onCandidateChange?.invoke()
     }
 
     /** Drops the dragged thought onto the nearest strand, snapping it into place. */
@@ -262,7 +313,7 @@ class WebScene {
         var best: String? = null
         var bestD = Float.MAX_VALUE
         for ((id, q) in projected) {
-            if (id in exclude) continue
+            if (id in exclude || dimOf(id) > 0.5f) continue
             val d = (q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y)
             if (d < bestD) {
                 bestD = d
@@ -287,6 +338,15 @@ class WebScene {
         snap?.let { if (now - it.start > SNAP_LIFE) snap = null }
         spawns.entries.removeAll { now - it.value > SPAWN_LIFE }
         ripples.removeAll { now - it.start > RIPPLE_LIFE }
+        pops.entries.removeAll { now - it.value > 1_000_000_000L }
+
+        // Ease each thought toward lit or dimmed as the category filter changes.
+        val k = 1f - exp(-7f * dt)
+        for (id in base.keys) {
+            val target = dimTarget(id)
+            val cur = dim[id] ?: target
+            dim[id] = cur + (target - cur) * k
+        }
         frameNanos = now
     }
 
@@ -356,7 +416,8 @@ class WebScene {
         val near = camera.distance - radius - 1f
         val far = camera.distance + radius + 1f
         fun fade(depth: Float) = 1f - 0.72f * ((depth - near) / (far - near)).coerceIn(0f, 1f)
-        fun colorOf(id: String) = style.palette[colorIndexOf(id) % style.palette.size]
+        fun colorOf(id: String) = colorFor(id, style)
+        fun vis(id: String) = 1f - 0.85f * dimOf(id)
 
         // Silk cross-strands.
         for ((a, b) in silk) {
@@ -372,7 +433,7 @@ class WebScene {
             }
             val progress = age?.let { easeOutCubic((it - 0.35f) / 0.8f) } ?: 1f
             if (progress <= 0f) continue
-            val f = min(fade(pa.depth), fade(pb.depth))
+            val f = min(fade(pa.depth), fade(pb.depth)) * min(vis(a), vis(b))
             val start = Offset(from.x, from.y)
             val end = lerp(start, Offset(to.x, to.y), progress)
             val glowBoost = if (age != null) (1f - smoothstep(0.8f, 2f, age)) * 0.5f else 0f
@@ -390,7 +451,7 @@ class WebScene {
             val pid = parentOf[n.id] ?: continue
             val a = projected[pid] ?: continue
             val b = projected[n.id] ?: continue
-            val f = min(fade(a.depth), fade(b.depth))
+            val f = min(fade(a.depth), fade(b.depth)) * min(vis(pid), vis(n.id))
             val width = max(1f, 0.02f * sqrt(a.ppu * b.ppu))
             var bend = 0f
             var boost = 0f
@@ -432,29 +493,24 @@ class WebScene {
         val order = projected.entries.sortedByDescending { it.value.depth }
         val focused = focusedId
         for ((id, p) in order) {
-            val f = fade(p.depth)
-            val c = colorOf(id)
             val grow = spawnAge(id, now)?.let { easeOutBack(it / SPAWN_TIME) } ?: 1f
-            var r = NODE_R * p.ppu * grow
+            val popScale = pops[id]?.let { 1f + 0.45f * exp(-7f * ((now - it) / 1e9f)) * sin(20f * ((now - it) / 1e9f)) } ?: 1f
+            val d = dimOf(id)
+            var r = NODE_R * p.ppu * grow * popScale * (1f - 0.4f * d)
             if (id == focused) r *= 1.2f
             if (drag?.id == id) r *= 1.35f
-            val center = Offset(p.x, p.y)
-            drawCircle(
-                brush = Brush.radialGradient(
-                    0f to c.copy(alpha = 0.55f * f),
-                    1f to Color.Transparent,
-                    center = center,
-                    radius = r * 3.4f,
-                ),
-                radius = r * 3.4f,
-                center = center,
+            if (drag?.candidate == id) r *= 1.15f + 0.08f * sin(t * 10f)
+            drawOrb(
+                center = Offset(p.x, p.y),
+                r = r,
+                color = colorOf(id),
+                mood = moods[id],
+                t = t,
+                ph = phases[id] ?: 0f,
+                f = fade(p.depth) * (1f - 0.85f * d),
+                focused = id == focused,
+                style = style,
             )
-            drawCircle(c.copy(alpha = 0.25f + 0.75f * f), radius = r, center = center)
-            drawCircle(Color.White.copy(alpha = 0.5f * f), radius = r * 0.36f, center = center - Offset(r * 0.28f, r * 0.28f))
-            if (id == focused) {
-                val pulse = 0.5f + 0.5f * sin(t * 3f)
-                drawCircle(style.focus.copy(alpha = 0.5f + 0.4f * pulse), radius = r * (1.7f + 0.15f * pulse), center = center, style = Stroke(1.5.dp.toPx()))
-            }
         }
 
         // A little web spun around each newly woven thought.
@@ -481,13 +537,13 @@ class WebScene {
 
         // Labels for the nearest, readable thoughts.
         val readable = order.asReversed().asSequence()
-            .filter { NODE_R * it.value.ppu > 6f }
+            .filter { NODE_R * it.value.ppu > 6f && dimOf(it.key) < 0.5f }
             .take(MAX_LABELS)
             .toList()
         for ((id, p) in readable) {
             val text = snippets[id] ?: continue
             val layout = measure(id, text)
-            val f = fade(p.depth) * (spawnAge(id, now)?.let { smoothstep(0.4f, 1f, it) } ?: 1f)
+            val f = fade(p.depth) * vis(id) * (spawnAge(id, now)?.let { smoothstep(0.4f, 1f, it) } ?: 1f)
             if (f <= 0.05f) continue
             val ls = (p.ppu / 170f).coerceIn(0.7f, 1.25f) * if (id == focused) 1.12f else 1f
             val r = NODE_R * p.ppu
@@ -497,15 +553,198 @@ class WebScene {
             if (topLeft.x > size.width || topLeft.y > size.height || topLeft.x + w < 0f || topLeft.y + h < 0f) continue
             val padX = 10f * ls
             val padY = 5f * ls
+            val category = categories[id]
+            val dotR = 4f * ls
+            val lead = if (category != null) dotR * 2f + 6f * ls else 0f
             drawRoundRect(
                 style.labelBackground.copy(alpha = style.labelBackground.alpha * f),
-                topLeft = topLeft - Offset(padX, padY),
-                size = Size(w + padX * 2, h + padY * 2),
+                topLeft = topLeft - Offset(padX + lead, padY),
+                size = Size(w + padX * 2 + lead, h + padY * 2),
                 cornerRadius = CornerRadius((h + padY * 2) / 2f),
             )
+            if (category != null) {
+                drawCircle(Color(category.argb).copy(alpha = f), radius = dotR, center = Offset(topLeft.x - lead + dotR, topLeft.y + h / 2f))
+            }
             scale(ls, pivot = topLeft) {
                 drawText(layout.result, color = style.label, topLeft = topLeft, alpha = f)
             }
+        }
+    }
+
+    /**
+     * A living orb: a breathing aura, a roaming highlight over shaded glass, a slow inner swirl
+     * and – depending on its mood – orbiting sparkles, rising embers or a falling drop.
+     */
+    private fun DrawScope.drawOrb(
+        center: Offset,
+        r: Float,
+        color: Color,
+        mood: Mood?,
+        t: Float,
+        ph: Float,
+        f: Float,
+        focused: Boolean,
+        style: WebStyle,
+    ) {
+        if (r <= 0.3f || f <= 0.01f) return
+        val speed = when (mood) {
+            Mood.Joyful -> 2.4f
+            Mood.Calm -> 0.8f
+            Mood.Curious -> 1.6f
+            Mood.Inspired -> 1.9f
+            Mood.Fired -> 3.2f
+            Mood.Blue -> 0.6f
+            null -> 1.2f
+        }
+        val pulseAmount = when (mood) {
+            Mood.Joyful -> 0.11f
+            Mood.Fired -> 0.08f
+            Mood.Inspired -> 0.07f
+            Mood.Calm -> 0.06f
+            else -> 0.045f
+        }
+        val beat = when (mood) {
+            Mood.Joyful -> abs(sin(t * speed + ph))
+            Mood.Fired -> (0.5f + 0.5f * (0.5f * sin(t * 7.3f + ph) + 0.3f * sin(t * 11.1f + ph * 2f) + 0.2f * sin(t * 3.1f))).coerceIn(0f, 1f)
+            else -> 0.5f + 0.5f * sin(t * speed + ph)
+        }
+        var c0 = center
+        when (mood) {
+            Mood.Curious -> c0 += Offset(sin(t * 3f + ph), cos(t * 2.3f + ph)) * (r * 0.07f)
+            Mood.Blue -> c0 += Offset(0f, r * 0.08f * sin(t * 0.8f + ph))
+            else -> Unit
+        }
+        val rr = r * (1f + pulseAmount * (beat - 0.5f) * 2f)
+        val tint = when (mood) {
+            Mood.Fired -> lerpColor(color, EMBER, 0.6f)
+            Mood.Blue -> lerpColor(color, RAIN, 0.5f)
+            Mood.Inspired -> lerpColor(color, Color.White, 0.25f)
+            else -> color
+        }
+
+        // Aura.
+        val auraR = rr * (3f + 0.6f * beat)
+        drawCircle(
+            brush = Brush.radialGradient(
+                0f to tint.copy(alpha = 0.5f * f * (0.75f + 0.25f * beat)),
+                0.45f to tint.copy(alpha = 0.16f * f),
+                1f to Color.Transparent,
+                center = c0,
+                radius = auraR,
+            ),
+            radius = auraR,
+            center = c0,
+        )
+
+        // Glassy body lit from a slowly roaming highlight.
+        val la = t * speed * 0.6f + ph
+        val light = c0 + Offset(cos(la), sin(la) * 0.6f - 0.5f) * (rr * 0.45f)
+        val body = 0.3f + 0.7f * f
+        drawCircle(
+            brush = Brush.radialGradient(
+                0f to lerpColor(color, Color.White, 0.55f).copy(alpha = body),
+                0.55f to color.copy(alpha = body),
+                1f to lerpColor(color, Color.Black, 0.45f).copy(alpha = body),
+                center = light,
+                radius = rr * 1.4f,
+            ),
+            radius = rr,
+            center = c0,
+        )
+
+        if (rr > 5f) {
+            // Inner swirl.
+            rotate(degrees = (t * speed * 40f + ph * 57f) % 360f, pivot = c0) {
+                drawCircle(
+                    brush = Brush.sweepGradient(
+                        listOf(
+                            Color.Transparent,
+                            Color.White.copy(alpha = 0.26f * f),
+                            Color.Transparent,
+                            lerpColor(color, Color.White, 0.6f).copy(alpha = 0.22f * f),
+                            Color.Transparent,
+                        ),
+                        center = c0,
+                    ),
+                    radius = rr * 0.9f,
+                    center = c0,
+                )
+            }
+            drawCircle(
+                lerpColor(color, Color.White, 0.4f).copy(alpha = 0.35f * f),
+                radius = rr,
+                center = c0,
+                style = Stroke(max(0.8f, rr * 0.07f)),
+            )
+        }
+        // Specular glint.
+        drawCircle(Color.White.copy(alpha = 0.65f * f), radius = rr * 0.2f, center = light - Offset(rr * 0.05f, rr * 0.05f))
+
+        if (rr > 6f) moodParticles(c0, rr, color, tint, mood, t, ph, speed, f)
+
+        if (focused) {
+            val pulse = 0.5f + 0.5f * sin(t * 3f)
+            drawCircle(
+                style.focus.copy(alpha = 0.5f + 0.4f * pulse),
+                radius = rr * (1.7f + 0.15f * pulse),
+                center = c0,
+                style = Stroke(1.5.dp.toPx()),
+            )
+        }
+    }
+
+    private fun DrawScope.moodParticles(
+        c: Offset,
+        rr: Float,
+        color: Color,
+        tint: Color,
+        mood: Mood?,
+        t: Float,
+        ph: Float,
+        speed: Float,
+        f: Float,
+    ) {
+        when (mood) {
+            Mood.Fired -> repeat(3) { i ->
+                // Embers drifting up and out.
+                val k = ((t * 0.9f + i / 3f + ph) % 1f + 1f) % 1f
+                val pos = c + Offset(sin(k * 6f + i * 2f + ph) * rr * 0.6f, -rr * (1f + k * 2.4f))
+                drawCircle(EMBER.copy(alpha = (1f - k) * f), radius = rr * 0.13f * (1f - k * 0.7f), center = pos)
+            }
+            Mood.Blue -> {
+                // A single drop falling away.
+                val k = ((t * 0.45f + ph) % 1f + 1f) % 1f
+                val pos = c + Offset(0f, rr * (1.15f + k * 2f))
+                drawCircle(RAIN.copy(alpha = (1f - k) * 0.85f * f), radius = rr * 0.12f, center = pos)
+            }
+            Mood.Joyful, Mood.Inspired, Mood.Curious -> {
+                val count = when (mood) {
+                    Mood.Inspired -> 5
+                    Mood.Joyful -> 3
+                    else -> 1
+                }
+                val tiltC = cos(ph)
+                val tiltS = sin(ph)
+                for (i in 0 until count) {
+                    val ang = t * speed * (0.7f + 0.2f * i) + i * (2f * PI.toFloat() / count) + ph
+                    val rx = rr * (1.8f + 0.25f * i)
+                    val ry = rx * 0.45f
+                    val ex = cos(ang) * rx
+                    val ey = sin(ang) * ry
+                    val pos = c + Offset(ex * tiltC - ey * tiltS, ex * tiltS + ey * tiltC)
+                    val twinkle = 0.5f + 0.5f * sin(t * 5f + i * 1.7f + ph)
+                    val sparkColor = if (mood == Mood.Joyful) lerpColor(color, Color.White, 0.5f) else Color.White
+                    val size = rr * 0.1f * (0.6f + 0.6f * twinkle)
+                    drawCircle(sparkColor.copy(alpha = f * (0.4f + 0.6f * twinkle)), radius = size, center = pos)
+                    if (mood == Mood.Inspired) {
+                        val arm = size * 2.6f
+                        val a = f * 0.7f * twinkle
+                        drawLine(tint.copy(alpha = a), pos - Offset(arm, 0f), pos + Offset(arm, 0f), strokeWidth = max(0.8f, size * 0.4f), cap = StrokeCap.Round)
+                        drawLine(tint.copy(alpha = a), pos - Offset(0f, arm), pos + Offset(0f, arm), strokeWidth = max(0.8f, size * 0.4f), cap = StrokeCap.Round)
+                    }
+                }
+            }
+            Mood.Calm, null -> Unit
         }
     }
 
@@ -537,7 +776,7 @@ class WebScene {
         val b = Offset(node.x, node.y)
         val mid = (a + b) / 2f
         val e = easeOutCubic(age / BREAK_TIME)
-        val color = style.palette[colorIndexOf(s.nodeId) % style.palette.size].copy(alpha = 0.8f * (1f - e))
+        val color = colorFor(s.nodeId, style).copy(alpha = 0.8f * (1f - e))
         val width = max(1f, 0.02f * parent.ppu)
         // Both halves whip back toward their anchors, curling as they go.
         strand(a, lerp(mid, a, e), color, width, 18f * (1f - e))
@@ -640,6 +879,8 @@ class WebScene {
         private const val MIN_HIT_PX = 44f
         private const val MAX_LABELS = 36
         private const val DUST_COUNT = 240
+        private val EMBER = Color(0xFFFF8A50)
+        private val RAIN = Color(0xFF7FA8FF)
     }
 }
 

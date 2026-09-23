@@ -3,7 +3,19 @@ package com.mobilaunch.weave.ui
 import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.view.View
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.ui.graphics.Color
+import com.mobilaunch.weave.data.Category
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -99,15 +111,33 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                 sounds.playSnap()
                 view.confirmHaptic()
             },
+            onTick = { view.haptic(HapticFeedbackConstants.CLOCK_TICK) },
+            onDoubleTapEmpty = {
+                view.haptic(HapticFeedbackConstants.CONTEXT_CLICK)
+                scene.recenter()
+            },
             modifier = Modifier.fillMaxSize(),
         )
 
-        TopBar(
-            count = notes.size,
-            onList = { showList = true },
-            onRecenter = { scene.recenter() },
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
+        Column(Modifier.align(Alignment.TopCenter).statusBarsPadding()) {
+            TopBar(
+                count = notes.size,
+                onList = { showList = true },
+                onRecenter = { scene.recenter() },
+            )
+            val counts = remember(notes) { notes.mapNotNull { it.category }.groupingBy { it }.eachCount() }
+            AnimatedVisibility(visible = counts.isNotEmpty() && editor == null) {
+                CategoryFilterBar(
+                    counts = counts,
+                    total = notes.size,
+                    selected = scene.filter,
+                    onSelect = { category ->
+                        view.haptic(HapticFeedbackConstants.CLOCK_TICK)
+                        scene.applyFilter(category)
+                    },
+                )
+            }
+        }
 
         if (notes.isEmpty() && editor == null) {
             EmptyState(Modifier.align(Alignment.Center).padding(32.dp))
@@ -133,8 +163,11 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                 .navigationBarsPadding()
                 .padding(20.dp),
         ) {
+            val fabInteraction = remember { MutableInteractionSource() }
             ExtendedFloatingActionButton(
                 onClick = { openNew() },
+                interactionSource = fabInteraction,
+                modifier = Modifier.pressBounce(fabInteraction),
                 icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
                 text = { Text("New thought") },
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -152,21 +185,24 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                         scene.releaseEditingView()
                     }
                 } else {
-                    val parentSnippet = (target as? EditorTarget.New)?.parentId
-                        ?.let { pid -> notes.firstOrNull { it.id == pid }?.snippet }
+                    val parent = (target as? EditorTarget.New)?.parentId
+                        ?.let { pid -> notes.firstOrNull { it.id == pid } }
                     NoteEditor(
                         isNew = target is EditorTarget.New,
                         initialText = existing?.text.orEmpty(),
                         createdAt = existing?.createdAt,
                         updatedAt = existing?.updatedAt,
-                        branchFrom = parentSnippet,
+                        branchFrom = parent?.snippet,
+                        initialMood = existing?.mood,
+                        // New thoughts inherit the category being viewed, or their parent's.
+                        initialCategory = existing?.category ?: scene.filter ?: parent?.category,
                         flyTarget = {
                             if (existing == null) scene.viewCenter() else scene.screenPos(existing.id)
                         },
-                        onSave = { text ->
+                        onSave = { text, mood, category ->
                             when (target) {
                                 is EditorTarget.New -> {
-                                    val note = vm.createNote(text, target.parentId)
+                                    val note = vm.createNote(text, target.parentId, mood, category)
                                     scene.onNoteCreated(note, WebScene.SPAWN_DELAY_MS)
                                     scope.launch {
                                         delay(WebScene.SPAWN_DELAY_MS)
@@ -174,7 +210,7 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                                         view.confirmHaptic()
                                     }
                                 }
-                                is EditorTarget.Existing -> vm.updateNote(target.id, text)
+                                is EditorTarget.Existing -> vm.updateNote(target.id, text, mood, category)
                             }
                         },
                         onDelete = {
@@ -196,7 +232,7 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
     if (showList) {
         ThoughtList(
             notes = notes,
-            colorFor = { id -> style.palette[scene.colorIndexOf(id) % style.palette.size] },
+            colorFor = { id -> scene.colorFor(id, style) },
             onPick = { id ->
                 showList = false
                 openExisting(id)
@@ -229,28 +265,81 @@ private fun TopBar(count: Int, onList: () -> Unit, onRecenter: () -> Unit, modif
     Row(
         modifier
             .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(start = 24.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            .padding(start = 24.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Column(Modifier.weight(1f)) {
             Text("Weave", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurface)
-            Text(
-                when (count) {
-                    0 -> "A web of thoughts"
-                    1 -> "1 thought"
-                    else -> "$count thoughts"
+            // The count rolls up or down as thoughts come and go.
+            AnimatedContent(
+                targetState = count,
+                transitionSpec = {
+                    val up = targetState > initialState
+                    (slideInVertically { if (up) it else -it } + fadeIn()) togetherWith
+                        (slideOutVertically { if (up) -it else it } + fadeOut())
                 },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+                label = "count",
+            ) { n ->
+                Text(
+                    when (n) {
+                        0 -> "A web of thoughts"
+                        1 -> "1 thought"
+                        else -> "$n thoughts"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        FilledTonalIconButton(onClick = onList) {
+        val listInteraction = remember { MutableInteractionSource() }
+        FilledTonalIconButton(onClick = onList, interactionSource = listInteraction, modifier = Modifier.pressBounce(listInteraction)) {
             Icon(Icons.AutoMirrored.Rounded.List, contentDescription = "All thoughts")
         }
-        FilledTonalIconButton(onClick = onRecenter) {
+        val homeInteraction = remember { MutableInteractionSource() }
+        FilledTonalIconButton(onClick = onRecenter, interactionSource = homeInteraction, modifier = Modifier.pressBounce(homeInteraction)) {
             Icon(Icons.Rounded.Home, contentDescription = "Recenter the web")
+        }
+    }
+}
+
+/** "All" plus every category in use, with counts. Picking one lights only those thoughts. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategoryFilterBar(
+    counts: Map<Category, Int>,
+    total: Int,
+    selected: Category?,
+    onSelect: (Category?) -> Unit,
+) {
+    Row(
+        Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = selected == null,
+            onClick = { onSelect(null) },
+            label = { Text("All · $total") },
+        )
+        for (category in Category.entries) {
+            val n = counts[category] ?: continue
+            key(category) {
+            val interaction = remember { MutableInteractionSource() }
+            FilterChip(
+                selected = selected == category,
+                onClick = { onSelect(if (selected == category) null else category) },
+                label = { Text("${category.label} · $n") },
+                leadingIcon = { CategoryDot(category, 8.dp) },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f),
+                    selectedContainerColor = Color(category.argb).copy(alpha = 0.3f),
+                ),
+                interactionSource = interaction,
+                modifier = Modifier.pressBounce(interaction),
+            )
+            }
         }
     }
 }
