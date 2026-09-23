@@ -52,6 +52,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -69,8 +73,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private sealed interface EditorTarget {
-    data class New(val parentId: String?) : EditorTarget
-    data class Existing(val id: String) : EditorTarget
+    /** Where the full-screen editor grows out of. */
+    val origin: Rect?
+
+    data class New(val parentId: String?, override val origin: Rect?) : EditorTarget
+    data class Existing(val id: String, override val origin: Rect?) : EditorTarget
 }
 
 @Composable
@@ -87,16 +94,19 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
     val style = rememberWebStyle()
     var editor by remember { mutableStateOf<EditorTarget?>(null) }
     var showList by rememberSaveable { mutableStateOf(false) }
+    var fabBounds by remember { mutableStateOf<Rect?>(null) }
+    val density = LocalDensity.current
+    val orbRadiusPx = with(density) { 14.dp.toPx() }
 
     fun openExisting(id: String) {
-        scene.focusOn(id, editing = true)
-        editor = EditorTarget.Existing(id)
+        val origin = scene.screenPos(id)?.let { Rect(it, with(density) { 24.dp.toPx() }) }
+        scene.focusOn(id, editing = false)
+        editor = EditorTarget.Existing(id, origin)
     }
 
     fun openNew() {
         val parent = scene.focusedId ?: notes.maxByOrNull { it.createdAt }?.id
-        parent?.let { scene.focusOn(it, editing = true) }
-        editor = EditorTarget.New(parent)
+        editor = EditorTarget.New(parent, fabBounds)
     }
 
     Box(Modifier.fillMaxSize().background(style.background)) {
@@ -167,7 +177,9 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
             ExtendedFloatingActionButton(
                 onClick = { openNew() },
                 interactionSource = fabInteraction,
-                modifier = Modifier.pressBounce(fabInteraction),
+                modifier = Modifier
+                    .pressBounce(fabInteraction)
+                    .onGloballyPositioned { fabBounds = it.boundsInRoot() },
                 icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
                 text = { Text("New thought") },
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -187,7 +199,7 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                 } else {
                     val parent = (target as? EditorTarget.New)?.parentId
                         ?.let { pid -> notes.firstOrNull { it.id == pid } }
-                    NoteEditor(
+                    WorldEditor(
                         isNew = target is EditorTarget.New,
                         initialText = existing?.text.orEmpty(),
                         createdAt = existing?.createdAt,
@@ -196,9 +208,11 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                         initialMood = existing?.mood,
                         // New thoughts inherit the category being viewed, or their parent's.
                         initialCategory = existing?.category ?: scene.filter ?: parent?.category,
+                        origin = target.origin,
                         flyTarget = {
                             if (existing == null) scene.viewCenter() else scene.screenPos(existing.id)
                         },
+                        orbRadiusPx = orbRadiusPx,
                         onSave = { text, mood, category ->
                             when (target) {
                                 is EditorTarget.New -> {

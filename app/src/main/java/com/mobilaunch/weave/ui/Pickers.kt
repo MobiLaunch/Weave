@@ -58,12 +58,28 @@ fun Modifier.pressBounce(interactionSource: MutableInteractionSource): Modifier 
     }
 }
 
-/** A row of emoji moods. Picking one makes it hop; tapping it again clears it. */
+/**
+ * A row of emoji moods. Picking one makes it hop; tapping it again clears it.
+ * With [onAuto], a leading 🪄 bubble hands the choice back to mood sensing, and the
+ * [sensed] mood gets a soft ring while auto is on.
+ */
 @Composable
-fun MoodPicker(selected: Mood?, onSelect: (Mood?) -> Unit, modifier: Modifier = Modifier) {
+fun MoodPicker(
+    selected: Mood?,
+    onSelect: (Mood?) -> Unit,
+    modifier: Modifier = Modifier,
+    auto: Boolean = false,
+    sensed: Mood? = null,
+    onAuto: (() -> Unit)? = null,
+) {
     Column(modifier) {
         Text(
-            selected?.let { "Feeling ${it.label.lowercase()}" } ?: "How does this feel?",
+            when {
+                auto && sensed != null -> "Sensing ${sensed.label.lowercase()} – tap a mood to choose your own"
+                auto -> "Sensing your mood as you write…"
+                selected != null -> "Feeling ${selected.label.lowercase()}"
+                else -> "How does this feel?"
+            },
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -73,15 +89,21 @@ fun MoodPicker(selected: Mood?, onSelect: (Mood?) -> Unit, modifier: Modifier = 
                 .padding(top = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            if (onAuto != null) {
+                MoodBubble("🪄", "Sense my mood", selected = auto, hinted = false) { onAuto() }
+            }
             for (mood in Mood.entries) {
-                MoodBubble(mood, mood == selected) { onSelect(if (mood == selected) null else mood) }
+                val isSelected = !auto && mood == selected
+                MoodBubble(mood.emoji, mood.label, isSelected, hinted = auto && mood == sensed) {
+                    onSelect(if (isSelected) null else mood)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun MoodBubble(mood: Mood, selected: Boolean, onClick: () -> Unit) {
+private fun MoodBubble(emoji: String, label: String, selected: Boolean, hinted: Boolean, onClick: () -> Unit) {
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val hop = remember { Animatable(0f) }
@@ -96,7 +118,11 @@ private fun MoodBubble(mood: Mood, selected: Boolean, onClick: () -> Unit) {
         label = "moodBg",
     )
     val ring by animateColorAsState(
-        if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+        when {
+            selected -> MaterialTheme.colorScheme.primary
+            hinted -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+            else -> Color.Transparent
+        },
         label = "moodRing",
     )
     val interaction = remember { MutableInteractionSource() }
@@ -125,10 +151,10 @@ private fun MoodBubble(mood: Mood, selected: Boolean, onClick: () -> Unit) {
                 }
                 onClick()
             }
-            .semantics { contentDescription = mood.label },
+            .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Text(mood.emoji, fontSize = 22.sp)
+        Text(emoji, fontSize = 22.sp)
     }
 }
 

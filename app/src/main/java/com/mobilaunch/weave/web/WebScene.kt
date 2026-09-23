@@ -27,6 +27,8 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import com.mobilaunch.weave.data.Category
 import com.mobilaunch.weave.data.Mood
 import com.mobilaunch.weave.data.Note
+import com.mobilaunch.weave.world.Biome
+import com.mobilaunch.weave.world.drawPlanet
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -84,6 +86,7 @@ class WebScene {
     private val moods = HashMap<String, Mood>()
     private val categories = HashMap<String, Category>()
     private val dim = HashMap<String, Float>()
+    private var clusters: Map<Category?, List<String>> = emptyMap()
     private var silk: List<Pair<String, String>> = emptyList()
     private var centroid = Vec3.ZERO
     private var radius = 1f
@@ -137,6 +140,7 @@ class WebScene {
         generation.clear()
         generation.putAll(WebLayout.generations(parentOf))
         silk = WebLayout.silkLinks(base, parentOf)
+        clusters = next.groupBy({ it.category }, { it.id }).filterValues { it.size >= 2 }
         centroid = WebLayout.centroid(base.values)
         radius = base.values.maxOfOrNull { it.distanceTo(centroid) } ?: 0f
         dim.keys.retainAll(ids)
@@ -210,9 +214,10 @@ class WebScene {
         val points = base.values + note.pos
         camera.animateTo(
             center = note.pos,
-            distance = max(fitDistance(note.pos, points), camera.distance + 2.5f),
+            // Pull back far enough that the web reads as clustered solar systems.
+            distance = max(fitDistance(note.pos, points) * 1.3f, camera.distance + 3f),
             offsetFrac = 0f,
-            durationMs = 1700,
+            durationMs = 2100,
         )
     }
 
@@ -419,6 +424,11 @@ class WebScene {
         fun colorOf(id: String) = colorFor(id, style)
         fun vis(id: String) = 1f - 0.85f * dimOf(id)
 
+        // Each category is a little solar system: a sun at its heart and faint orbits through its thoughts.
+        for ((category, members) in clusters) {
+            drawSolarSystem(category, members, style, t) { fade(it) }
+        }
+
         // Silk cross-strands.
         for ((a, b) in silk) {
             val pa = projected[a] ?: continue
@@ -571,6 +581,90 @@ class WebScene {
         }
     }
 
+    private fun DrawScope.drawSolarSystem(
+        category: Category?,
+        members: List<String>,
+        style: WebStyle,
+        t: Float,
+        fade: (Float) -> Float,
+    ) {
+        val points = members.mapNotNull { base[it] }
+        if (points.size < 2) return
+        val sunPos = WebLayout.centroid(points)
+        val sp = camera.project(sunPos) ?: return
+        val lit = if (filter == null || filter == category) 1f else 0.12f
+        val f = fade(sp.depth) * lit
+        if (f <= 0.02f) return
+        val col = category?.let { Color(it.argb) } ?: style.focus
+        val seed = category?.ordinal?.toFloat() ?: 9f
+
+        for (id in members.take(MAX_ORBITS)) {
+            val mp = base[id] ?: continue
+            val d = mp - sunPos
+            val rad = d.length()
+            if (rad < 0.2f) continue
+            val u = d / rad
+            var n = u.cross(Vec3.UP)
+            if (n.length() < 0.2f) n = u.cross(Vec3(1f, 0f, 0f))
+            val w = n.normalized().cross(u).normalized()
+            val path = Path()
+            var started = false
+            for (i in 0..ORBIT_STEPS) {
+                val a = i / ORBIT_STEPS.toFloat() * 2f * PI.toFloat()
+                val q = camera.project(sunPos + (u * cos(a) + w * sin(a)) * rad)
+                if (q == null) {
+                    started = false
+                    continue
+                }
+                if (!started) path.moveTo(q.x, q.y) else path.lineTo(q.x, q.y)
+                started = true
+            }
+            drawPath(
+                path,
+                col.copy(alpha = 0.16f * f),
+                style = Stroke(max(0.8f, 0.006f * sp.ppu), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 9f))),
+            )
+        }
+
+        val c = Offset(sp.x, sp.y)
+        val sr = max(4f, 0.2f * sp.ppu) * (1f + 0.06f * sin(t * 2f + seed))
+        drawCircle(
+            brush = Brush.radialGradient(
+                0f to col.copy(alpha = 0.5f * f),
+                0.35f to col.copy(alpha = 0.18f * f),
+                1f to Color.Transparent,
+                center = c,
+                radius = sr * 4.5f,
+            ),
+            radius = sr * 4.5f,
+            center = c,
+        )
+        rotate(degrees = t * 10f + seed * 20f, pivot = c) {
+            for (i in 0 until 12) {
+                val a = i * (2f * PI.toFloat() / 12f)
+                val len = 1.9f + 0.35f * sin(t * 3f + i)
+                drawLine(
+                    col.copy(alpha = 0.45f * f),
+                    c + Offset(cos(a), sin(a)) * (sr * 1.3f),
+                    c + Offset(cos(a), sin(a)) * (sr * len),
+                    strokeWidth = max(1f, sr * 0.12f),
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+        drawCircle(
+            brush = Brush.radialGradient(
+                0f to Color.White.copy(alpha = f),
+                0.6f to lerpColor(col, Color.White, 0.4f).copy(alpha = f),
+                1f to col.copy(alpha = f),
+                center = c,
+                radius = sr,
+            ),
+            radius = sr,
+            center = c,
+        )
+    }
+
     /**
      * A living orb: a breathing aura, a roaming highlight over shaded glass, a slow inner swirl
      * and – depending on its mood – orbiting sparkles, rising embers or a falling drop.
@@ -636,51 +730,65 @@ class WebScene {
             center = c0,
         )
 
-        // Glassy body lit from a slowly roaming highlight.
-        val la = t * speed * 0.6f + ph
-        val light = c0 + Offset(cos(la), sin(la) * 0.6f - 0.5f) * (rr * 0.45f)
-        val body = 0.3f + 0.7f * f
-        drawCircle(
-            brush = Brush.radialGradient(
-                0f to lerpColor(color, Color.White, 0.55f).copy(alpha = body),
-                0.55f to color.copy(alpha = body),
-                1f to lerpColor(color, Color.Black, 0.45f).copy(alpha = body),
-                center = light,
-                radius = rr * 1.4f,
-            ),
-            radius = rr,
-            center = c0,
-        )
-
-        if (rr > 5f) {
-            // Inner swirl.
-            rotate(degrees = (t * speed * 40f + ph * 57f) % 360f, pivot = c0) {
-                drawCircle(
-                    brush = Brush.sweepGradient(
-                        listOf(
-                            Color.Transparent,
-                            Color.White.copy(alpha = 0.26f * f),
-                            Color.Transparent,
-                            lerpColor(color, Color.White, 0.6f).copy(alpha = 0.22f * f),
-                            Color.Transparent,
-                        ),
-                        center = c0,
-                    ),
-                    radius = rr * 0.9f,
-                    center = c0,
-                )
-            }
+        if (mood != null && rr > 7f) {
+            // Big enough to see its world: a tiny planet in its mood's biome, ringed in its colour.
+            drawPlanet(
+                c = c0,
+                r = rr,
+                biome = Biome.of(mood),
+                t = t + ph * 5f,
+                detail = ((rr - 16f) / 24f).coerceIn(0f, 1f),
+                opacity = 0.3f + 0.7f * f,
+                sky = rr > 26f,
+            )
+            drawCircle(color.copy(alpha = 0.55f * f), radius = rr * 1.22f, center = c0, style = Stroke(max(1f, rr * 0.05f)))
+        } else {
+            // Glassy body lit from a slowly roaming highlight.
+            val la = t * speed * 0.6f + ph
+            val light = c0 + Offset(cos(la), sin(la) * 0.6f - 0.5f) * (rr * 0.45f)
+            val body = 0.3f + 0.7f * f
             drawCircle(
-                lerpColor(color, Color.White, 0.4f).copy(alpha = 0.35f * f),
+                brush = Brush.radialGradient(
+                    0f to lerpColor(color, Color.White, 0.55f).copy(alpha = body),
+                    0.55f to color.copy(alpha = body),
+                    1f to lerpColor(color, Color.Black, 0.45f).copy(alpha = body),
+                    center = light,
+                    radius = rr * 1.4f,
+                ),
                 radius = rr,
                 center = c0,
-                style = Stroke(max(0.8f, rr * 0.07f)),
             )
-        }
-        // Specular glint.
-        drawCircle(Color.White.copy(alpha = 0.65f * f), radius = rr * 0.2f, center = light - Offset(rr * 0.05f, rr * 0.05f))
 
-        if (rr > 6f) moodParticles(c0, rr, color, tint, mood, t, ph, speed, f)
+            if (rr > 5f) {
+                // Inner swirl.
+                rotate(degrees = (t * speed * 40f + ph * 57f) % 360f, pivot = c0) {
+                    drawCircle(
+                        brush = Brush.sweepGradient(
+                            listOf(
+                                Color.Transparent,
+                                Color.White.copy(alpha = 0.26f * f),
+                                Color.Transparent,
+                                lerpColor(color, Color.White, 0.6f).copy(alpha = 0.22f * f),
+                                Color.Transparent,
+                            ),
+                            center = c0,
+                        ),
+                        radius = rr * 0.9f,
+                        center = c0,
+                    )
+                }
+                drawCircle(
+                    lerpColor(color, Color.White, 0.4f).copy(alpha = 0.35f * f),
+                    radius = rr,
+                    center = c0,
+                    style = Stroke(max(0.8f, rr * 0.07f)),
+                )
+            }
+            // Specular glint.
+            drawCircle(Color.White.copy(alpha = 0.65f * f), radius = rr * 0.2f, center = light - Offset(rr * 0.05f, rr * 0.05f))
+
+            if (rr > 6f) moodParticles(c0, rr, color, tint, mood, t, ph, speed, f)
+        }
 
         if (focused) {
             val pulse = 0.5f + 0.5f * sin(t * 3f)
@@ -866,7 +974,7 @@ class WebScene {
 
     companion object {
         const val NODE_R = 0.13f
-        const val SPAWN_DELAY_MS = 520L
+        const val SPAWN_DELAY_MS = 900L
         private const val SPAWN_TIME = 1.1f
         private const val SPAWN_LIFE = 2_400_000_000L
         private const val SNAP_LIFE = 1_300_000_000L
@@ -879,6 +987,8 @@ class WebScene {
         private const val MIN_HIT_PX = 44f
         private const val MAX_LABELS = 36
         private const val DUST_COUNT = 240
+        private const val MAX_ORBITS = 14
+        private const val ORBIT_STEPS = 48
         private val EMBER = Color(0xFFFF8A50)
         private val RAIN = Color(0xFF7FA8FF)
     }
