@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import com.mobilaunch.weave.data.Category
 import com.mobilaunch.weave.data.Mood
 import com.mobilaunch.weave.data.MoodBlend
+import com.mobilaunch.weave.ui.theme.Twilight
 import kotlinx.coroutines.launch
 
 /** Squishes a little while pressed and springs back on release. */
@@ -125,7 +126,7 @@ private fun MoodBubble(emoji: String, label: String, selected: Boolean, hinted: 
         label = "moodScale",
     )
     val background by animateColorAsState(
-        if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+        if (selected) MaterialTheme.colorScheme.primary else Twilight.glass,
         label = "moodBg",
     )
     val ring by animateColorAsState(
@@ -170,10 +171,8 @@ private fun MoodBubble(emoji: String, label: String, selected: Boolean, hinted: 
 }
 
 /** Category chips, each with its colour dot. Tapping the selected one clears it. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryPicker(selected: Category?, onSelect: (Category?) -> Unit, modifier: Modifier = Modifier) {
-    val view = LocalView.current
     Column(modifier) {
         Text(
             "Category",
@@ -188,24 +187,46 @@ fun CategoryPicker(selected: Category?, onSelect: (Category?) -> Unit, modifier:
         ) {
             for (category in Category.entries) {
                 val isSelected = category == selected
-                val interaction = remember { MutableInteractionSource() }
-                FilterChip(
-                    selected = isSelected,
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                        onSelect(if (isSelected) null else category)
-                    },
-                    label = { Text(category.label) },
-                    leadingIcon = { CategoryDot(category, if (isSelected) 10.dp else 8.dp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = Color(category.argb).copy(alpha = 0.28f),
-                    ),
-                    interactionSource = interaction,
-                    modifier = Modifier.pressBounce(interaction),
-                )
+                CategoryChip(category, category.label, isSelected) {
+                    onSelect(if (isSelected) null else category)
+                }
             }
         }
     }
+}
+
+/**
+ * One category filter chip – "All" when [category] is null. Shared by the picker in the editor
+ * and the filter bar on the main screen so the two controls can never drift apart visually.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CategoryChip(category: Category?, label: String, selected: Boolean, onClick: () -> Unit) {
+    val view = LocalView.current
+    val interaction = remember { MutableInteractionSource() }
+    FilterChip(
+        selected = selected,
+        onClick = {
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            onClick()
+        },
+        label = { Text(label) },
+        leadingIcon = if (category != null) {
+            { CategoryDot(category, if (selected) 10.dp else 8.dp) }
+        } else {
+            null
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = Twilight.glass,
+            labelColor = MaterialTheme.colorScheme.onSurface,
+            iconColor = MaterialTheme.colorScheme.onSurface,
+            selectedContainerColor = (category?.let { Color(it.argb) } ?: MaterialTheme.colorScheme.primary).copy(alpha = 0.32f),
+            selectedLabelColor = MaterialTheme.colorScheme.onSurface,
+            selectedLeadingIconColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        interactionSource = interaction,
+        modifier = Modifier.pressBounce(interaction),
+    )
 }
 
 @Composable

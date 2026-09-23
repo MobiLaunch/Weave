@@ -1,54 +1,18 @@
 package com.mobilaunch.weave.ui.theme
 
-import android.os.Build
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 
-// Google-flavoured fallback for devices without Material You (Android 11 and older).
-private val WeaveDark = darkColorScheme(
-    primary = Color(0xFFA8C7FA),
-    onPrimary = Color(0xFF062E6F),
-    primaryContainer = Color(0xFF0842A0),
-    onPrimaryContainer = Color(0xFFD3E3FD),
-    secondary = Color(0xFF7FCFFF),
-    onSecondary = Color(0xFF003549),
-    secondaryContainer = Color(0xFF004A77),
-    onSecondaryContainer = Color(0xFFC2E7FF),
-    tertiary = Color(0xFF6DD58C),
-    onTertiary = Color(0xFF0A3818),
-    tertiaryContainer = Color(0xFF0F5223),
-    onTertiaryContainer = Color(0xFFC4EED0),
-    background = Color(0xFF0F1014),
-    onBackground = Color(0xFFE3E3E3),
-    surface = Color(0xFF0F1014),
-    onSurface = Color(0xFFE3E3E3),
-    surfaceVariant = Color(0xFF444746),
-    onSurfaceVariant = Color(0xFFC4C7C5),
-    surfaceContainerLowest = Color(0xFF0B0C0F),
-    surfaceContainerLow = Color(0xFF17181C),
-    surfaceContainer = Color(0xFF1B1C20),
-    surfaceContainerHigh = Color(0xFF26272B),
-    surfaceContainerHighest = Color(0xFF313236),
-    outline = Color(0xFF8E918F),
-    error = Color(0xFFF2B8B5),
-)
-
-/** Always dark – thoughts glow best against the night – and tinted by the wallpaper on Pixel. */
-@Composable
-fun WeaveTheme(content: @Composable () -> Unit) {
-    val scheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        dynamicDarkColorScheme(LocalContext.current)
-    } else {
-        WeaveDark
-    }
-    MaterialTheme(colorScheme = scheme, content = content)
-}
-
-/** The brighter twilight palette behind the web and the editor. */
+/**
+ * One fixed palette drives the whole app – the 3D web, the world editor, and every button,
+ * chip and dialog on top of them. Earlier builds let the chrome follow Android's per-wallpaper
+ * Material You colours while the web painted its own fixed "Twilight" gradient underneath;
+ * on plenty of wallpapers those two systems visibly clashed (a muddy FAB over a bright violet
+ * sky, a differently-tinted chip in the editor than on the main screen). Keeping everything on
+ * this one palette is what makes the UI consistent screen to screen and device to device.
+ */
 object Twilight {
     val top = Color(0xFF232A72)
     val bottom = Color(0xFF4B2C73)
@@ -57,4 +21,45 @@ object Twilight {
     val labelPill = Color(0xEEFFFFFF)
     val orbs = listOf(Color(0xFF8AB4F8), Color(0xFFFF8BCB), Color(0xFF78D9EC), Color(0xFFFDD663))
     val focus = Color(0xFFFFE08A)
+
+    /** The frosted-glass fill every "resting" chip, bubble and field shares. */
+    val glass = Color.White.copy(alpha = 0.14f)
+}
+
+private val WeaveColorScheme = darkColorScheme(
+    primary = Color(0xFF8AB4F8),
+    onPrimary = Color(0xFF0B1550),
+    primaryContainer = Color(0xFF1F3B8C),
+    onPrimaryContainer = Color(0xFFD8E6FF),
+    secondary = Color(0xFF8DE0EC),
+    onSecondary = Color(0xFF00363D),
+    secondaryContainer = Twilight.glass,
+    onSecondaryContainer = Color(0xFFF3FBFC),
+    tertiary = Color(0xFFFFB0DE),
+    onTertiary = Color(0xFF4A0032),
+    tertiaryContainer = Color(0xFF6B2452),
+    onTertiaryContainer = Color(0xFFFFE0F0),
+    background = Twilight.bottom,
+    onBackground = Color(0xFFF6F3FF),
+    surface = Color(0xFF2B2660),
+    onSurface = Color(0xFFF6F3FF),
+    surfaceVariant = Color(0xFF433D80),
+    onSurfaceVariant = Color(0xFFCCC6EC),
+    surfaceContainerLowest = Color(0xFF1C1852),
+    surfaceContainerLow = Color(0xFF241F5C),
+    surfaceContainer = Color(0xFF2B2666),
+    surfaceContainerHigh = Color(0xFF362F76),
+    surfaceContainerHighest = Color(0xFF413A86),
+    outline = Color.White.copy(alpha = 0.35f),
+    outlineVariant = Color.White.copy(alpha = 0.18f),
+    error = Color(0xFFFF7A7A),
+    onError = Color(0xFF400000),
+    errorContainer = Color(0xFF5C1F1F),
+    onErrorContainer = Color(0xFFFFD9D9),
+)
+
+/** Always dark and always this same Twilight palette – thoughts glow best against the night. */
+@Composable
+fun WeaveTheme(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = WeaveColorScheme, content = content)
 }

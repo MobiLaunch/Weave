@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -74,8 +75,8 @@ import androidx.compose.ui.unit.sp
 import com.mobilaunch.weave.data.Category
 import com.mobilaunch.weave.data.Mood
 import com.mobilaunch.weave.data.MoodBlend
-import com.mobilaunch.weave.ui.theme.Twilight
 import com.mobilaunch.weave.data.MoodSense
+import com.mobilaunch.weave.ui.theme.Twilight
 import com.mobilaunch.weave.world.Biome
 import com.mobilaunch.weave.world.drawPlanet
 import kotlinx.coroutines.delay
@@ -244,10 +245,15 @@ fun WorldEditor(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
                     IconButton(onClick = { if (exit == null) exit = WorldExit.Dismiss }) {
-                        Icon(Icons.Rounded.Close, contentDescription = "Close")
+                        Icon(Icons.Rounded.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface)
                     }
                     Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                        Text(if (isNew) "New thought" else "Thought", style = MaterialTheme.typography.titleLarge)
+                        // Smaller than the mood/world title below it, which is the real headline here.
+                        Text(
+                            if (isNew) "New thought" else "Thought",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
                         Text(
                             stampLine(isNew, createdAt, updatedAt),
                             style = MaterialTheme.typography.labelMedium,
@@ -308,10 +314,15 @@ fun WorldEditor(
                     placeholder = { Text("What's on your mind? Your world is listening…") },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp, lineHeight = 26.sp),
                     colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.6f),
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.6f),
+                        focusedContainerColor = Twilight.glass,
+                        unfocusedContainerColor = Twilight.glass,
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        cursorColor = MaterialTheme.colorScheme.primary,
                     ),
                     shape = MaterialTheme.shapes.extraLarge,
                     modifier = Modifier
@@ -385,15 +396,24 @@ fun WorldEditor(
             onDismissRequest = { confirmDelete = false },
             title = { Text("Delete this thought?") },
             text = { Text("Anything branching from it will reconnect to the thought it grew from.") },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = false
-                    onDelete()
-                    exit = WorldExit.Dismiss
-                }) { Text("Delete") }
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        onDelete()
+                        exit = WorldExit.Dismiss
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("Delete") }
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
+                TextButton(
+                    onClick = { confirmDelete = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                ) { Text("Keep") }
             },
         )
     }

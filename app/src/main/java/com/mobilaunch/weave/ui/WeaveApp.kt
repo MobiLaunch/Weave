@@ -11,9 +11,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.ui.graphics.Color
 import com.mobilaunch.weave.data.Category
 import com.mobilaunch.weave.ui.theme.Twilight
@@ -137,7 +134,9 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                 onRecenter = { scene.recenter() },
             )
             val counts = remember(notes) { notes.mapNotNull { it.category }.groupingBy { it }.eachCount() }
-            AnimatedVisibility(visible = counts.isNotEmpty() && editor == null) {
+            // Stays up (as just an "All" chip) even if the filtered category just emptied out –
+            // otherwise a filter with nothing left in it can never be cleared.
+            AnimatedVisibility(visible = (counts.isNotEmpty() || scene.filter != null) && editor == null) {
                 CategoryFilterBar(
                     counts = counts,
                     total = notes.size,
@@ -154,7 +153,7 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
             EmptyState(Modifier.align(Alignment.Center).padding(32.dp))
         } else if (notes.size in 1..4 && editor == null) {
             Text(
-                "Drag to spin · Pinch to zoom · Hold a thought to move it",
+                "Drag to spin · Pinch to zoom · Hold a thought to move it · Double-tap to recenter",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -183,8 +182,8 @@ fun WeaveApp(vm: WeaveViewModel = viewModel()) {
                     .onGloballyPositioned { fabBounds = it.boundsInRoot() },
                 icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
                 text = { Text("New thought") },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
             )
         }
 
@@ -323,7 +322,6 @@ private fun TopBar(count: Int, onList: () -> Unit, onRecenter: () -> Unit, modif
 }
 
 /** "All" plus every category in use, with counts. Picking one lights only those thoughts. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CategoryFilterBar(
     counts: Map<Category, Int>,
@@ -337,28 +335,13 @@ private fun CategoryFilterBar(
             .padding(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        FilterChip(
-            selected = selected == null,
-            onClick = { onSelect(null) },
-            label = { Text("All · $total") },
-            colors = FilterChipDefaults.filterChipColors(containerColor = Color.White.copy(alpha = 0.14f)),
-        )
+        CategoryChip(null, "All · $total", selected == null) { onSelect(null) }
         for (category in Category.entries) {
             val n = counts[category] ?: continue
             key(category) {
-            val interaction = remember { MutableInteractionSource() }
-            FilterChip(
-                selected = selected == category,
-                onClick = { onSelect(if (selected == category) null else category) },
-                label = { Text("${category.label} · $n") },
-                leadingIcon = { CategoryDot(category, 8.dp) },
-                colors = FilterChipDefaults.filterChipColors(
-                    containerColor = Color.White.copy(alpha = 0.14f),
-                    selectedContainerColor = Color(category.argb).copy(alpha = 0.3f),
-                ),
-                interactionSource = interaction,
-                modifier = Modifier.pressBounce(interaction),
-            )
+                CategoryChip(category, "${category.label} · $n", selected == category) {
+                    onSelect(if (selected == category) null else category)
+                }
             }
         }
     }
